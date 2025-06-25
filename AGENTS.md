@@ -143,3 +143,34 @@ Include any diagrams, logs, or links that help reviewers understand the fix.  Pl
 * External API reference snapshots live under `docs/delta-exchange-api-docs/`
 
 Refer to these paths when cross-linking from resolved reports. 
+
+---
+## 13. Telemetry Logging Implementation Workflow
+
+The observability roadmap lives in `docs/telemetry-planning.md`.  Each **phase** (P-1 … P-7) is delivered with the same discipline used for bug fixes, but through a dedicated trigger phrase so that CODEX can automate scaffolding and quality-gates.
+
+### 13.1 Trigger Phrase
+> **IMPLEMENT THE PHASE-<n> OF LOGGING in docs/telemetry-planning.md**
+
+Using the phrase above (replace `<n>` with 1-7) in a PR description or chat message immediately spins up the following automated workflow:
+1. Create a feature branch `telemetry/phase-<n>`.
+2. Apply code changes listed for that phase in `docs/telemetry-planning.md`.
+3. Run `make ci` and telemetry smoke-tests.
+4. Open a draft PR ready for review.
+
+### 13.2 Per-Phase Checklist (CI Enforced)
+- [ ] Code matches exact insertion points & items in `docs/telemetry-planning.md`.
+- [ ] All existing tests + new telemetry tests pass (`make ci`).
+- [ ] `/metrics` endpoint returns **HTTP 200** and exposes new metrics family.
+- [ ] Jaeger (or Tempo) shows at least one span emitted by this phase (smoke test).
+- [ ] Feature flag `TELEMETRY_PHASE_<n>_ENABLED` defaults **true** in dev, **false** in prod charts until reviewed.
+- [ ] Documentation — toggle corresponding checkbox in Section 6 of `telemetry-planning.md`.
+
+### 13.3 Branch & Commit Convention
+| Item   | Format                                    | Example                               |
+|--------|-------------------------------------------|---------------------------------------|
+| Branch | `telemetry/phase-<n>-<short-title>`       | `telemetry/phase-3-broadcast-hub`     |
+| Commit | `telemetry(<area>): phase-<n> <summary>`  | `telemetry(websocket): phase-2 ingest`|
+| PR     | `telemetry: phase-<n> – <short-title>`    | `telemetry: phase-1 core bootstrap`   |
+
+Follow the existing review, merge and escalation rules (Sections 4, 10 & 11) for all telemetry work. 

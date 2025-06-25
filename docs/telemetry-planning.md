@@ -47,6 +47,20 @@ require (
 Each phase is independent; merge on green CI.
 
 ---
+## 1.1 Implementation Protocol & Quality Gates (read **before** starting any phase)
+
+1. **One-phase-per-PR** – never mix items from different phases in the same branch.
+2. **Branch naming**: `telemetry/phase-<n>` (e.g. `telemetry/phase-1-core-bootstrap`).
+3. **Trigger phrase** in PR or chat to CODEX: `IMPLEMENT THE PHASE-<n> OF LOGGING in docs/telemetry-planning.md` – spins up the automated workflow for that phase.
+4. **Double-check checklist** (CI enforces):
+   - `make ci` green (build, vet, lint, tests, race).
+   - Added / updated unit & integration tests prove signals are emitted.
+   - `/metrics` endpoint and Jaeger traces verified in a smoke test.
+   - Documentation sections & checkboxes in this file updated.
+5. **Rollback ready** – guard each new exporter / handler behind a feature flag (`TELEMETRY_PHASE_<n>_ENABLED`) so it can be disabled at runtime.
+6. **Reviewer focus** – reviewers must check for cardinality explosions, context propagation leaks and exporter error handling.
+
+---
 ## 2. Instrumentation Work-Items (file oriented)
 
 > **Line numbers** refer to current *dev-phase-02* branch snapshot. Caution: re-check after rebases.
