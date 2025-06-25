@@ -22,6 +22,24 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+// isTelemetryPhase5Enabled checks if telemetry phase 5 is enabled via environment variable.
+// It follows standard boolean environment variable conventions:
+// - Unset or empty: false (disabled)
+// - Truthy values ("true", "1", "yes", "on", "enable"): true (enabled)
+// - Falsy values ("false", "0", "no", "off", "disable"): false (disabled)
+func isTelemetryPhase5Enabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("TELEMETRY_PHASE_5_ENABLED")))
+	switch value {
+	case "true", "1", "yes", "on", "enable":
+		return true
+	case "", "false", "0", "no", "off", "disable":
+		return false
+	default:
+		// For any other values, default to false (disabled)
+		return false
+	}
+}
+
 func main() {
 
 	// Create a context that is canceled when the program receives an interrupt signal
@@ -58,7 +76,7 @@ func main() {
 
 	// Create the gRPC server with optional telemetry interceptor (phase 5)
 	grpcOpts := []grpc.ServerOption{}
-	if strings.ToLower(os.Getenv("TELEMETRY_PHASE_5_ENABLED")) != "false" {
+	if isTelemetryPhase5Enabled() {
 		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()))
 	}
 	grpcServer := grpc.NewServer(grpcOpts...)
