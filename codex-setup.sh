@@ -14,8 +14,8 @@ export GOBIN="$GOPATH/bin"
 export PATH="$GOBIN:$PATH"
 mkdir -p "$GOPATH"/{bin,src,pkg}
 
-# Navigate to project (CODEX clones to /workspace/)
-cd /workspace
+# Navigate to project directory (CODEX clones to /workspace/websocket-integration-challange)
+cd /workspace/websocket-integration-challange
 
 # Install required Go tools (parallel for speed)
 echo "📦 Installing Go development tools..."
@@ -52,7 +52,7 @@ echo ""
 echo "============================================================================="
 echo "🎉 CODEX ENVIRONMENT READY!"
 echo "============================================================================="
-echo "📁 Project: /workspace/"
+echo "📁 Project: /workspace/websocket-integration-challange"
 echo "🐹 Go: $(go version | cut -d' ' -f3)"
 echo "🔧 Protoc: $(protoc --version 2>/dev/null || echo 'available')"
 echo ""
