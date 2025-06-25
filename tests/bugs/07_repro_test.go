@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/consentsam/websocket-integration-challange/internal/config"
@@ -12,9 +11,6 @@ import (
 )
 
 func TestBug07_Repro(t *testing.T) {
-	if os.Getenv("CI") == "true" {
-		t.Skip("Regression test; passes post-fix")
-	}
 	cfg, err := config.LoadConfig("websocket-service")
 	if err != nil {
 		t.Fatalf("load config: %v", err)
