@@ -34,7 +34,7 @@ run:
 	$(GO) run $(GO_BUILD_FLAGS) main.go
 
 .PHONY: build
-build:
+build: proto
 	$(GO) build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(SERVICE_NAME) main.go
 
 .PHONY: clean
@@ -61,8 +61,10 @@ vendor:
 # Protocol Buffers
 .PHONY: proto
 proto:
+	@which $(PROTOC) > /dev/null || (echo "Error: protoc not found. Install with: brew install protobuf (macOS) or sudo apt-get install protobuf-compiler (Ubuntu/Debian)" && exit 1)
 	mkdir -p $(GEN_DIR)
-	protoc --go_out=./gen ./protos/websocket/v1/api.proto  --go-grpc_out=./gen
+	$(PROTOC) --go_out=./gen ./protos/websocket/v1/api.proto --go-grpc_out=./gen
+
 
 # Docker
 .PHONY: docker-build

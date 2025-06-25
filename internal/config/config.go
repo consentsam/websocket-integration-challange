@@ -153,6 +153,7 @@ func LoadConfig(serviceName string) (*Config, error) {
 	// Validate final configuration
 	log.Printf("Loaded configuration for %s in %s environment", config.ServiceName, config.Environment)
 	log.Printf("HTTP Port: %d, gRPC Port: %d", config.HTTPPort, config.GRPCPort)
+
 	log.Printf("Metrics Enabled: %v, Endpoint: %s", config.Metrics.Enabled, config.Metrics.Endpoint)
 	log.Printf("Delta ProductIDs: %v", config.Delta.ProductIDs)
 
