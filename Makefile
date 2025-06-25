@@ -67,6 +67,35 @@ test-coverage:
 dev:
 	air -c .air.toml
 
+# CI Pipeline (mirrors GitHub Actions)
+.PHONY: ci
+ci: build vet staticcheck test-race proto-check
+	@echo "✅ All CI checks passed!"
+
+.PHONY: vet
+vet:
+	$(GO) vet ./...
+
+.PHONY: staticcheck
+staticcheck:
+	staticcheck ./...
+
+.PHONY: test-race
+test-race:
+	$(GO) test -race ./...
+
+.PHONY: proto-check
+proto-check:
+	@echo "Checking if protobuf code is up to date..."
+	@$(MAKE) proto
+	@if git diff --exit-code > /dev/null 2>&1; then \
+		echo "✅ Protobuf code is up to date"; \
+	else \
+		echo "❌ Protobuf code is out of date. Run 'make proto' and commit changes."; \
+		git diff; \
+		exit 1; \
+	fi
+
 # Help
 .PHONY: help
 help:
@@ -81,5 +110,10 @@ help:
 	@echo "  docker-run     - Run Docker container"
 	@echo "  test           - Run tests"
 	@echo "  test-coverage  - Run tests with coverage"
+	@echo "  test-race      - Run tests with race detector"
 	@echo "  dev            - Run with hot reload (requires air)"
+	@echo "  ci             - Run full CI pipeline (build, vet, staticcheck, test-race, proto-check)"
+	@echo "  vet            - Run go vet"
+	@echo "  staticcheck    - Run staticcheck linter"
+	@echo "  proto-check    - Verify protobuf code is up to date"
 	@echo "  help           - Show this help"

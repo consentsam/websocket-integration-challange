@@ -1,0 +1,26 @@
+name: "Bug Fix"
+description: "Create a branch & PR to fix an existing documented bug"
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Instructions
+        1. Verify the bug is already documented under `docs/bugs/` or `docs/bugs-phase-02/`.
+        2. The issue title **must** start with the bug ID, e.g. `03-bug-03: race condition broadcast`.
+        3. After creating this issue, create a branch `bug/<bug-id>-<kebab-title>` and open a PR that references this issue ("closes #<number>").
+  - type: input
+    id: bug-id
+    attributes:
+      label: Bug ID (from markdown file)
+      placeholder: "03-bug-03"
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / notes for the implementer
+      description: "Optional – add any insights, logs or links that help the assignee reproduce or fix the bug."
+    validations:
+      required: false 
