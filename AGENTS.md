@@ -22,7 +22,7 @@ Fix, test and merge every documented bug (`docs/bugs/**/*.md` and `docs/bugs-pha
 ```bash
 # 0. Pre-requisites (first time only)
 make deps proto            # download modules & generate code
-make ci                    # run local mirror of CI pipeline
+make ci                    # run local mirror of CI pipeline (works offline)
 
 # 1. Pick a bug & create branch
 BUG=03-bug-03-race-condition-websocket-handler
@@ -40,7 +40,7 @@ make test -race | cat
 #    ‑ create resolved report in docs/bug-fix/<bug-id>-<title>-resolved.md
 
 # 4. Verify locally
-make ci                    # build, vet, lint, tests, race, proto-diff
+make ci                    # build, vet, lint, tests, race, proto-diff (works offline)
 
 # 5. Commit & push
 git add .
@@ -56,7 +56,7 @@ Detailed per-bug steps are documented in section 8.
 ---
 ## 4. Pull-Request Checklist (enforced)
 - [ ] Links to bug markdown (e.g. `closes docs/bugs/03-bug-03-race-condition-websocket-handler.md`).
-- [ ] `make ci` passes (build + vet + staticcheck + tests ‑race + proto diff clean).
+- [ ] `make ci` passes (build + vet + staticcheck + tests ‑race + proto diff clean) — works offline.
 - [ ] New or updated tests cover the fix (failing on `dev` / passing on branch).
 - [ ] Documentation updated (bug Status, overview counters, CHANGELOG if needed).
 - [ ] Resolved report added under `docs/bug-fix/` with verification steps.
@@ -89,7 +89,7 @@ Detailed per-bug steps are documented in section 8.
 2. **Test First** – translate reproduction steps into failing test.
 3. **Verify RED** – `make test -race`; ensure failure.
 4. **Fix** – implement code & docs changes.
-5. **Local CI** – `make ci`.
+5. **Local CI** – `make ci` (works offline).
 6. **Docs** – mark bug as `Fixed`, update overview counts.
 7. **Push & PR** – PR auto-fills template; complete checklist.
 8. **Review & Merge** – squash merge once green.
@@ -102,7 +102,7 @@ Detailed per-bug steps are documented in section 8.
 | Install deps | `make deps`                |
 | Generate PB  | `make proto`               |
 | Build app    | `make build`               |
-| Full CI      | `make ci`                  |
+| Full CI      | `make ci` (offline ready)  |
 | Hot reload   | `make dev`                 |
 | Coverage     | `make test-coverage`       |
 
@@ -155,12 +155,12 @@ The observability roadmap lives in `docs/telemetry-planning.md`.  Each **phase**
 Using the phrase above (replace `<n>` with 1-7) in a PR description or chat message immediately spins up the following automated workflow:
 1. Create a feature branch `telemetry/phase-<n>`.
 2. Apply code changes listed for that phase in `docs/telemetry-planning.md`.
-3. Run `make ci` and telemetry smoke-tests.
+3. Run `make ci` (works offline) and telemetry smoke-tests.
 4. Open a draft PR ready for review.
 
 ### 13.2 Per-Phase Checklist (CI Enforced)
 - [ ] Code matches exact insertion points & items in `docs/telemetry-planning.md`.
-- [ ] All existing tests + new telemetry tests pass (`make ci`).
+- [ ] All existing tests + new telemetry tests pass (`make ci` — works offline).
 - [ ] `/metrics` endpoint returns **HTTP 200** and exposes new metrics family.
 - [ ] Jaeger (or Tempo) shows at least one span emitted by this phase (smoke test).
 - [ ] Feature flag `TELEMETRY_PHASE_<n>_ENABLED` defaults **true** in dev, **false** in prod charts until reviewed.
@@ -181,8 +181,8 @@ Follow the existing review, merge and escalation rules (Sections 4, 10 & 11) for
 Since CODEX (ChatGPT) environments don't have internet access, the repository includes a `vendor/` directory with all Go dependencies for offline builds.
 
 ### 14.1 How It Works
-- **With internet** (local development): `make ci` downloads dependencies as needed
-- **Without internet** (CODEX): `make ci` automatically uses vendored dependencies with `-mod=vendor`
+- **With internet** (local development): `make ci` downloads dependencies as needed and runs full CI pipeline
+- **Without internet** (CODEX): `make ci` automatically uses vendored dependencies with `-mod=vendor` and runs the same full CI pipeline
 
 ### 14.2 Maintaining Vendor Directory
 When dependencies change, update the vendor directory:
