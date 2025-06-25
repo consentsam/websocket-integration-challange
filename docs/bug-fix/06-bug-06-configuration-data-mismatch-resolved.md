@@ -10,4 +10,4 @@ The configuration loader failed to locate YAML files when the service binary was
 1. Run `go test -race ./tests/bugs -run TestBug06_Repro -v`.
    - Before the fix: test failed showing `BTCUSD`.
    - After the fix: test passes and logs `BTC_USDT`.
-2. Execute `make ci` to ensure all checks pass.
+2. Execute `make ci` to ensure all checks pass. 

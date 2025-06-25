@@ -30,4 +30,4 @@ func TestBug06_Repro(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Delta.ProductIDs, want) {
 		t.Fatalf("expected %v, got %v", want, cfg.Delta.ProductIDs)
 	}
-}
+} 
