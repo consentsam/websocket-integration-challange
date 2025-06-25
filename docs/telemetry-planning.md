@@ -110,7 +110,7 @@ Each phase is independent; merge on green CI.
 - [x] **Create telemetry package** (`telemetry/init.go`, `ctx.go`, `meter.go`).
 - [x] Add dependencies to `go.mod` & `go.sum`.
 - [x] **Phase 1** – wire `main.go` bootstrap, expose `/metrics`.
-- [ ] **Phase 2** – instrument `DeltaWebsocketClient.readPump` (span + counters).
+ - [x] **Phase 2** – instrument `DeltaWebsocketClient.readPump` (span + counters).
 - [ ] **Phase 3** – instrument `BroadcastToChannel` (span, counter, hist).
 - [ ] **Phase 4** – instrument `writePump` (span, counters, bytes).
 - [ ] **Phase 4b** – error counter in `run()` default drop path.
