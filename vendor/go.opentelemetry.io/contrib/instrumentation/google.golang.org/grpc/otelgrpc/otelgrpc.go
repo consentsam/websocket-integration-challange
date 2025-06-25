@@ -13,11 +13,11 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		tracer := otel.Tracer("grpc-server")
 		ctx, span := tracer.Start(ctx, info.FullMethod)
+		defer span.End()
 		resp, err := handler(ctx, req)
 		if err != nil {
 			span.RecordError(err)
 		}
-		span.End()
 		return resp, err
 	}
 }
