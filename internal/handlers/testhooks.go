@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/consentsam/websocket-integration-challange/internal/clients"
+	"github.com/gorilla/websocket"
 )
 
 // Helper functions used in tests to interact with the handler without going
@@ -68,3 +69,17 @@ func NewTestClient() *Client {
 func (h *WebsocketHandler) GetDeltaClient() clients.DeltaClient {
 	return h.deltaClient
 }
+
+// TestWritePump exposes the writePump method for tests.
+func (h *WebsocketHandler) TestWritePump(c *Client) {
+	h.writePump(c)
+}
+
+// SetConnForTest allows tests to assign a mock websocket connection.
+func (c *Client) SetConnForTest(conn *websocket.Conn) { c.conn = conn }
+
+// SendForTest queues a message directly to the client's send channel.
+func (c *Client) SendForTest(msg []byte) { c.send <- msg }
+
+// CloseSendForTest closes the client's send channel.
+func (c *Client) CloseSendForTest() { close(c.send) }
