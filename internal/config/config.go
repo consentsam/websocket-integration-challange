@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -92,6 +94,15 @@ func LoadConfig(serviceName string) (*Config, error) {
 	v.SetConfigType("yaml")
 	v.AddConfigPath("./config")
 	v.AddConfigPath(".")
+	if execPath, err := os.Executable(); err == nil {
+		execDir := filepath.Dir(execPath)
+		v.AddConfigPath(filepath.Join(execDir, "config"))
+		v.AddConfigPath(execDir)
+	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		base := filepath.Dir(filepath.Dir(filepath.Dir(file)))
+		v.AddConfigPath(filepath.Join(base, "config"))
+	}
 
 	// Set environment variable support
 	v.SetEnvPrefix("WEBSOCKET")
@@ -121,6 +132,7 @@ func LoadConfig(serviceName string) (*Config, error) {
 	log.Printf("Loaded configuration for %s in %s environment", config.ServiceName, config.Environment)
 	log.Printf("HTTP Port: %d, gRPC Port: %d", config.HTTPPort, config.GRPCPort)
 	log.Printf("Metrics Enabled: %v, Endpoint: %s", config.Metrics.Enabled, config.Metrics.Endpoint)
+	log.Printf("Delta ProductIDs: %v", config.Delta.ProductIDs)
 
 	return config, nil
 }
