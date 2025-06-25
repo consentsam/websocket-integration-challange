@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/consentsam/websocket-integration-challange/internal/handlers"
 	"github.com/consentsam/websocket-integration-challange/internal/server"
 	"github.com/consentsam/websocket-integration-challange/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -54,8 +56,12 @@ func main() {
 	websocketHandler := handlers.NewWebsocketHandler(ctx, cfg)
 	defer websocketHandler.Close()
 
-	// Create the gRPC server
-	grpcServer := grpc.NewServer()
+	// Create the gRPC server with optional telemetry interceptor (phase 5)
+	grpcOpts := []grpc.ServerOption{}
+	if strings.ToLower(os.Getenv("TELEMETRY_PHASE_5_ENABLED")) != "false" {
+		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()))
+	}
+	grpcServer := grpc.NewServer(grpcOpts...)
 	websocketServer := server.NewServer(ctx, cfg, websocketHandler)
 	websocketv1.RegisterWebsocketServiceServer(grpcServer, websocketServer)
 	reflection.Register(grpcServer)
