@@ -40,6 +40,20 @@ func isTelemetryPhase5Enabled() bool {
 	}
 }
 
+// isTelemetryPhase6Enabled checks if telemetry phase 6 is enabled via environment variable.
+// It follows the same boolean conventions as other phases.
+func isTelemetryPhase6Enabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("TELEMETRY_PHASE_6_ENABLED")))
+	switch value {
+	case "true", "1", "yes", "on", "enable":
+		return true
+	case "", "false", "0", "no", "off", "disable":
+		return false
+	default:
+		return false
+	}
+}
+
 func main() {
 
 	// Create a context that is canceled when the program receives an interrupt signal
@@ -109,10 +123,16 @@ func main() {
 		mux.Handle(cfg.Metrics.Endpoint, metricsMux)
 	}
 
+	// Wrap with panic recovery middleware if phase 6 is enabled
+	handler := http.Handler(mux)
+	if isTelemetryPhase6Enabled() {
+		handler = telemetry.RecoveryMiddleware(handler)
+	}
+
 	// Start the HTTP server
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.HTTPPort),
-		Handler: mux,
+		Handler: handler,
 	}
 	go func() {
 		log.Printf("Starting HTTP server on port %d", cfg.HTTPPort)
