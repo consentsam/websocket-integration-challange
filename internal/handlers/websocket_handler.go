@@ -427,8 +427,8 @@ func (h *WebsocketHandler) writePump(client *Client) {
 				return
 			}
 
-			w, err := client.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
+			// Send the primary message
+			if err := client.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				span.RecordError(err)
 				if clientDeliveryTotal != nil {
 					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
@@ -436,31 +436,27 @@ func (h *WebsocketHandler) writePump(client *Client) {
 				span.End()
 				return
 			}
-			bytesWritten, _ := w.Write(message)
 
 			// Increment the messages sent counter
 			atomic.AddInt64(&h.messagesSent, 1)
-			totalBytes := bytesWritten
+			totalBytes := len(message)
 
-			// Add queued messages to the current websocket message
+			// Send any additional queued messages separately (proper JSON)
 			n := len(client.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
 				msg := <-client.send
-				bw, _ := w.Write(msg)
-				totalBytes += 1 + bw
-				// Increment the messages sent counter
+				if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					span.RecordError(err)
+					if clientDeliveryTotal != nil {
+						clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					}
+					span.End()
+					return
+				}
+				totalBytes += len(msg)
 				atomic.AddInt64(&h.messagesSent, 1)
 			}
 
-			if err := w.Close(); err != nil {
-				span.RecordError(err)
-				if clientDeliveryTotal != nil {
-					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
-				}
-				span.End()
-				return
-			}
 			if clientDeliveryTotal != nil {
 				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "ok")))
 			}

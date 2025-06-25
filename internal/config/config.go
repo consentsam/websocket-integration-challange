@@ -1,8 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"log"
+	"os"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
 // Delta represents the configuration for the Delta Exchange websocket
@@ -56,10 +60,16 @@ type Config struct {
 
 // LoadConfig loads the configuration from the config file
 func LoadConfig(serviceName string) (*Config, error) {
+	// Detect environment
+	environment := os.Getenv("ENVIRONMENT")
+	if environment == "" {
+		environment = "local"
+	}
+
 	// Set default configuration values
 	config := &Config{
 		ServiceName: serviceName,
-		Environment: "local",
+		Environment: environment,
 		LogLevel:    "info",
 		HTTPPort:    8083,
 		GRPCPort:    9093,
@@ -72,19 +82,45 @@ func LoadConfig(serviceName string) (*Config, error) {
 		},
 	}
 
-	// // Use the server-utils config loader
-	// v, err := sc.LoadConfig(serviceName)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to load config: %w", err)
-	// }
+	// Set default metrics configuration
+	config.Metrics.Enabled = true
+	config.Metrics.Endpoint = "/metrics"
 
-	// // Unmarshal the configuration
-	// if err := v.Unmarshal(config); err != nil {
-	// 	return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	// }
+	// Initialize Viper
+	v := viper.New()
+	v.SetConfigName(environment)
+	v.SetConfigType("yaml")
+	v.AddConfigPath("./config")
+	v.AddConfigPath(".")
+
+	// Set environment variable support
+	v.SetEnvPrefix("WEBSOCKET")
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Try to read the configuration file
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			log.Printf("Config file not found for environment '%s', using defaults", environment)
+		} else {
+			return nil, fmt.Errorf("error reading config file: %w", err)
+		}
+	} else {
+		log.Printf("Using config file: %s", v.ConfigFileUsed())
+	}
+
+	// Unmarshal the configuration
+	if err := v.Unmarshal(config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Update environment field to match what was detected/loaded
+	config.Environment = environment
 
 	// Log the configuration
 	log.Printf("Loaded configuration for %s in %s environment", config.ServiceName, config.Environment)
+	log.Printf("HTTP Port: %d, gRPC Port: %d", config.HTTPPort, config.GRPCPort)
+	log.Printf("Metrics Enabled: %v, Endpoint: %s", config.Metrics.Enabled, config.Metrics.Endpoint)
 
 	return config, nil
 }
