@@ -1,25 +1,25 @@
 package handlers
 
 import (
-        "context"
-        "encoding/json"
-        "fmt"
-        "log"
-        "net/http"
-        "os"
-        "strings"
-        "sync"
-        "sync/atomic"
-        "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
-        "github.com/consentsam/websocket-integration-challange/internal/clients"
-        "github.com/consentsam/websocket-integration-challange/internal/config"
-        "github.com/consentsam/websocket-integration-challange/telemetry"
-        "github.com/gorilla/websocket"
-        "go.opentelemetry.io/otel"
-        "go.opentelemetry.io/otel/attribute"
-        "go.opentelemetry.io/otel/metric"
-        "go.opentelemetry.io/otel/trace"
+	"github.com/consentsam/websocket-integration-challange/internal/clients"
+	"github.com/consentsam/websocket-integration-challange/internal/config"
+	"github.com/consentsam/websocket-integration-challange/telemetry"
+	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Client represents a connected websocket client
@@ -36,42 +36,54 @@ type Client struct {
 
 // WebsocketHandler handles websocket connections
 type WebsocketHandler struct {
-        upgrader         websocket.Upgrader
-        clients          map[*Client]bool
-        clientsMu        sync.RWMutex
-        broadcast        chan []byte
-        register         chan *Client
-        unregister       chan *Client
-        subscriptions    map[string]map[*Client]bool
-        subscriptionsMu  sync.RWMutex
-        config           *config.Config
-        deltaClient      *clients.DeltaWebsocketClient
-        ctx              context.Context
-        cancel           context.CancelFunc
-        messagesSent     int64
-        messagesReceived int64
+	upgrader         websocket.Upgrader
+	clients          map[*Client]bool
+	clientsMu        sync.RWMutex
+	broadcast        chan []byte
+	register         chan *Client
+	unregister       chan *Client
+	subscriptions    map[string]map[*Client]bool
+	subscriptionsMu  sync.RWMutex
+	config           *config.Config
+	deltaClient      *clients.DeltaWebsocketClient
+	ctx              context.Context
+	cancel           context.CancelFunc
+	messagesSent     int64
+	messagesReceived int64
 }
 
 var (
-        tracer            = otel.Tracer("websocket-service")
-        broadcastTotal    metric.Int64Counter
-        broadcastLatency  metric.Int64Histogram
-        telemetryReady    bool
+	tracer              = otel.Tracer("websocket-service")
+	broadcastTotal      metric.Int64Counter
+	broadcastLatency    metric.Int64Histogram
+	clientDeliveryTotal metric.Int64Counter
+	clientBytesSent     metric.Int64Counter
+	telemetryReady      bool
 )
 
 func init() {
-        var err error
-        broadcastTotal, err = telemetry.Counter("broadcast_total")
-        if err != nil {
-                log.Printf("telemetry counter init failed: %v", err)
-                return
-        }
-        broadcastLatency, err = telemetry.Histogram("broadcast_latency_ms")
-        if err != nil {
-                log.Printf("telemetry histogram init failed: %v", err)
-                return
-        }
-        telemetryReady = true
+	var err error
+	broadcastTotal, err = telemetry.Counter("broadcast_total")
+	if err != nil {
+		log.Printf("telemetry counter init failed: %v", err)
+		return
+	}
+	broadcastLatency, err = telemetry.Histogram("broadcast_latency_ms")
+	if err != nil {
+		log.Printf("telemetry histogram init failed: %v", err)
+		return
+	}
+	clientDeliveryTotal, err = telemetry.Counter("client_delivery_total")
+	if err != nil {
+		log.Printf("telemetry counter init failed: %v", err)
+		return
+	}
+	clientBytesSent, err = telemetry.Counter("client_bytes_sent")
+	if err != nil {
+		log.Printf("telemetry counter init failed: %v", err)
+		return
+	}
+	telemetryReady = true
 }
 
 // NewWebsocketHandler creates a new websocket handler
@@ -164,30 +176,30 @@ func (h *WebsocketHandler) HandleWebsocket(w http.ResponseWriter, r *http.Reques
 
 // BroadcastToChannel broadcasts a message to all clients subscribed to a channel
 func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, productID string) {
-        telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_3_ENABLED")) != "false"
+	telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_3_ENABLED")) != "false"
 
-        // Get the clients subscribed to the channel
-        h.subscriptionsMu.RLock()
-        clients, ok := h.subscriptions[channel]
-        h.subscriptionsMu.RUnlock()
-        if !ok {
-                return
-        }
+	// Get the clients subscribed to the channel
+	h.subscriptionsMu.RLock()
+	clients, ok := h.subscriptions[channel]
+	h.subscriptionsMu.RUnlock()
+	if !ok {
+		return
+	}
 
-        var span trace.Span
-        ctx := h.ctx
-        var start time.Time
-        if telemetryEnabled {
-                ctx, span = tracer.Start(ctx, "broadcast.filter")
-                start = time.Now()
-        }
+	var span trace.Span
+	ctx := h.ctx
+	var start time.Time
+	if telemetryEnabled {
+		ctx, span = tracer.Start(ctx, "broadcast.filter")
+		start = time.Now()
+	}
 
-        // Broadcast the message to all clients subscribed to the channel
-        for client := range clients {
-                // Check if the client has a product filter for the channel
-                client.mu.RLock()
-                clientProductIDs, hasFilter := client.productFilters[channel]
-                client.mu.RUnlock()
+	// Broadcast the message to all clients subscribed to the channel
+	for client := range clients {
+		// Check if the client has a product filter for the channel
+		client.mu.RLock()
+		clientProductIDs, hasFilter := client.productFilters[channel]
+		client.mu.RUnlock()
 
 		// fmt.Println("WS_Handler: Broadcast: reading product ids:", clientProductIDs)
 
@@ -208,23 +220,23 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 			}
 		}
 
-                fmt.Println("WS_Handler: Broadcast: sending message to client:", client.id, "on channel:", channel, "for product:", productID)
+		fmt.Println("WS_Handler: Broadcast: sending message to client:", client.id, "on channel:", channel, "for product:", productID)
 
-                // Send the message to the client
-                select {
-                case client.send <- message:
-                default:
-                        h.unregister <- client
-                }
-        }
+		// Send the message to the client
+		select {
+		case client.send <- message:
+		default:
+			h.unregister <- client
+		}
+	}
 
-        if telemetryEnabled {
-                elapsed := time.Since(start).Milliseconds()
-                broadcastTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", channel)))
-                broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
-                span.SetAttributes(attribute.String("channel", channel))
-                span.End()
-        }
+	if telemetryEnabled {
+		elapsed := time.Since(start).Milliseconds()
+		broadcastTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", channel)))
+		broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
+		span.SetAttributes(attribute.String("channel", channel))
+		span.End()
+	}
 }
 
 // GetDeltaConnectionStatus gets the connection status of the Delta Exchange client
@@ -407,37 +419,65 @@ func (h *WebsocketHandler) writePump(client *Client) {
 		client.conn.Close()
 	}()
 
+	telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_4_ENABLED")) != "false"
+
 	for {
 		select {
 		case message, ok := <-client.send:
+			ctx := h.ctx
+			var span trace.Span
+			if telemetryEnabled {
+				ctx, span = tracer.Start(ctx, "client.write")
+			}
 			client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
 				// The hub closed the channel
 				client.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if telemetryEnabled {
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "closed")))
+					span.End()
+				}
 				return
 			}
 
 			w, err := client.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
+				if telemetryEnabled {
+					span.RecordError(err)
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					span.End()
+				}
 				return
 			}
-			w.Write(message)
+			bytesWritten, _ := w.Write(message)
 
 			// Increment the messages sent counter
 			atomic.AddInt64(&h.messagesSent, 1)
+			totalBytes := bytesWritten
 
 			// Add queued messages to the current websocket message
 			n := len(client.send)
 			for i := 0; i < n; i++ {
 				w.Write([]byte{'\n'})
 				msg := <-client.send
-				w.Write(msg)
+				bw, _ := w.Write(msg)
+				totalBytes += 1 + bw
 				// Increment the messages sent counter
 				atomic.AddInt64(&h.messagesSent, 1)
 			}
 
 			if err := w.Close(); err != nil {
+				if telemetryEnabled {
+					span.RecordError(err)
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					span.End()
+				}
 				return
+			}
+			if telemetryEnabled {
+				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "ok")))
+				clientBytesSent.Add(ctx, int64(totalBytes))
+				span.End()
 			}
 		case <-ticker.C:
 			client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
