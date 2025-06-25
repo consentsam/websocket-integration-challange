@@ -43,7 +43,7 @@ type WebsocketHandler struct {
 	subscriptions    map[string]map[*Client]bool
 	subscriptionsMu  sync.RWMutex
 	config           *config.Config
-	deltaClient      *clients.DeltaWebsocketClient
+	deltaClient      clients.DeltaClient
 	ctx              context.Context
 	cancel           context.CancelFunc
 	messagesSent     int64
@@ -140,6 +140,11 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 	go handler.run()
 
 	return handler
+}
+
+// SetDeltaClient allows injecting a custom Delta client (primarily for tests).
+func (h *WebsocketHandler) SetDeltaClient(dc clients.DeltaClient) {
+	h.deltaClient = dc
 }
 
 // HandleWebsocket handles a websocket connection
@@ -584,25 +589,26 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 
 					chName = channelName
 
+					// Remove the client subscription first
+					h.unsubscribeClient(client, channelName)
+
+					// After removal, check if Delta client should also unsubscribe (i.e. no remaining clients)
 					if h.deltaClient != nil {
-						if channel, ok := msg["type"].(string); ok {
-							if channel == "unsubscribe" {
-								//check if no other subscriptions exist for this channel
-								if clients, ok := h.subscriptions[channelName]; ok {
-									if len(clients) == 0 {
-										// Unsubscribe the client from the channel
-										h.deltaClient.Unsubscribe(channelName)
-									} else {
-									}
-								} else {
-									// Unsubscribe the client from the channel
-									h.deltaClient.Unsubscribe(channelName)
-								}
-							}
+						// Determine if any clients remain subscribed to this channel
+						h.subscriptionsMu.RLock()
+						clientsRemaining, hasSubscribers := h.subscriptions[channelName]
+						count := 0
+						if hasSubscribers {
+							count = len(clientsRemaining)
+						}
+						h.subscriptionsMu.RUnlock()
+
+						if !hasSubscribers {
+							h.deltaClient.Unsubscribe(channelName)
+						} else {
+							fmt.Println("WS_handler: Delta: still ", count, " clients subscribed to channel: ", channelName)
 						}
 					}
-					// Subscribe the client to the channel
-					h.unsubscribeClient(client, channelName)
 				}
 			}
 		}
