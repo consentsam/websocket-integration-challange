@@ -34,7 +34,7 @@ run:
 	$(GO) run $(GO_BUILD_FLAGS) main.go
 
 .PHONY: build
-build:
+build: proto
 	$(GO) build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(SERVICE_NAME) main.go
 
 .PHONY: clean
