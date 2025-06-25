@@ -15,6 +15,7 @@ import (
 	"github.com/consentsam/websocket-integration-challange/internal/config"
 	"github.com/consentsam/websocket-integration-challange/internal/handlers"
 	"github.com/consentsam/websocket-integration-challange/internal/server"
+	"github.com/consentsam/websocket-integration-challange/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -41,6 +42,12 @@ func main() {
 	cfg, err := config.LoadConfig("websocket-service")
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Bootstrap telemetry (phase 1)
+	metricsMux, err := telemetry.Init(ctx, cfg)
+	if err != nil {
+		log.Fatalf("telemetry init failed: %v", err)
 	}
 
 	// Create the websocket handler
@@ -74,15 +81,8 @@ func main() {
 	})
 
 	// Add metrics endpoint if enabled
-	if cfg.Metrics.Enabled {
-		mux.HandleFunc(cfg.Metrics.Endpoint, func(w http.ResponseWriter, r *http.Request) {
-			// In a real implementation, you would use a metrics library like Prometheus
-			stats := websocketHandler.GetStatistics()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"active_connections":%d,"active_subscriptions":%d,"messages_sent":%d,"messages_received":%d}`,
-				stats["active_connections"], stats["active_subscriptions"], stats["messages_sent"], stats["messages_received"])
-		})
+	if cfg.Metrics.Enabled && metricsMux != nil {
+		mux.Handle(cfg.Metrics.Endpoint, metricsMux)
 	}
 
 	// Start the HTTP server
