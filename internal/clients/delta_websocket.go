@@ -1,22 +1,20 @@
 package clients
 
 import (
-        "context"
-        "encoding/json"
-        "fmt"
-        "log"
-        "os"
-        "strings"
-        "sync"
-        "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"sync"
+	"time"
 
-        "github.com/consentsam/websocket-integration-challange/internal/config"
-       "github.com/consentsam/websocket-integration-challange/telemetry"
-       "github.com/gorilla/websocket"
-       "go.opentelemetry.io/otel"
-       "go.opentelemetry.io/otel/attribute"
-       "go.opentelemetry.io/otel/metric"
-       "go.opentelemetry.io/otel/trace"
+	"github.com/consentsam/websocket-integration-challange/internal/config"
+	"github.com/consentsam/websocket-integration-challange/telemetry"
+	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // MessageHandler is a function that handles messages from Delta Exchange
@@ -42,25 +40,25 @@ type DeltaWebsocketClient struct {
 	mu              sync.RWMutex
 	subscriptions   map[string]bool
 	subscriptionsMu sync.RWMutex
-        totalMessages   int
+	totalMessages   int
 }
 
 var (
-        tracer            = otel.Tracer("websocket-service")
-        deltaMessagesTotal metric.Int64Counter
-        jsonUnmarshalErr   metric.Int64Counter
+	tracer             = otel.Tracer("websocket-service")
+	deltaMessagesTotal metric.Int64Counter
+	jsonUnmarshalErr   metric.Int64Counter
 )
 
 func init() {
-        var err error
-        deltaMessagesTotal, err = telemetry.Counter("delta_messages_total")
-        if err != nil {
-                log.Printf("telemetry counter init failed: %v", err)
-        }
-        jsonUnmarshalErr, err = telemetry.Counter("json_unmarshal_errors_total")
-        if err != nil {
-                log.Printf("telemetry counter init failed: %v", err)
-        }
+	var err error
+	deltaMessagesTotal, err = telemetry.Counter("delta_messages_total")
+	if err != nil {
+		log.Printf("telemetry counter init failed: %v", err)
+	}
+	jsonUnmarshalErr, err = telemetry.Counter("json_unmarshal_errors_total")
+	if err != nil {
+		log.Printf("telemetry counter init failed: %v", err)
+	}
 }
 
 // NewDeltaWebsocketClient creates a new Delta Exchange websocket client
@@ -84,7 +82,6 @@ func NewDeltaWebsocketClient(ctx context.Context, cfg *config.Delta) *DeltaWebso
 
 // Connect connects to the Delta Exchange websocket API
 func (c *DeltaWebsocketClient) Connect() error {
-	fmt.Println("Delta_WS: Connect: Attempting to connect to Delta Exchange...")
 
 	// First check if already connected (with lock)
 	c.mu.Lock()
@@ -94,7 +91,6 @@ func (c *DeltaWebsocketClient) Connect() error {
 	}
 	c.mu.Unlock()
 
-	fmt.Println("Delta_WS: Connect: connecting url:", c.url)
 	// Connect to the websocket (without holding the lock)
 	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
 	if err != nil {
@@ -167,51 +163,41 @@ func (c *DeltaWebsocketClient) readPump() {
 		}
 	}()
 
-        telemetryEnabled := strings.ToLower(os.Getenv("TELEMETRY_PHASE_2_ENABLED")) != "false"
+	for {
+		ctx := c.ctx
+		var span trace.Span
+		ctx, span = tracer.Start(ctx, "delta.receive")
 
-        for {
-                ctx := c.ctx
-                var span trace.Span
-                if telemetryEnabled {
-                        ctx, span = tracer.Start(ctx, "delta.receive")
-                }
-
-                _, message, err := conn.ReadMessage()
-                // fmt.Println("Delta_WS: readPump: Read message:", string(message))
-                if err != nil {
-                        // Update error state with lock
+		_, message, err := conn.ReadMessage()
+		// fmt.Println("Delta_WS: readPump: Read message:", string(message))
+		if err != nil {
+			// Update error state with lock
 			c.mu.Lock()
 			c.lastError = fmt.Sprintf("Error reading from Delta Exchange: %v", err)
 			c.lastErrorAt = time.Now()
-                        c.mu.Unlock()
-                        if telemetryEnabled {
-                                span.RecordError(err)
-                                span.End()
-                        }
-                        return
-                }
+			c.mu.Unlock()
+			span.RecordError(err)
+			span.End()
+			return
+		}
 
-                // Parse the message to get the channel
-                var msg map[string]interface{}
-                if err := json.Unmarshal(message, &msg); err != nil {
-                        log.Printf("Error parsing message from Delta Exchange: %v", err)
-                        if telemetryEnabled {
-                                if jsonUnmarshalErr != nil {
-                                        jsonUnmarshalErr.Add(ctx, 1)
-                                }
-                                span.RecordError(err)
-                                span.End()
-                        }
-                        continue
-                }
+		// Parse the message to get the channel
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("Error parsing message from Delta Exchange: %v", err)
+			if jsonUnmarshalErr != nil {
+				jsonUnmarshalErr.Add(ctx, 1)
+			}
+			span.RecordError(err)
+			span.End()
+			continue
+		}
 
-                if telemetryEnabled {
-                        if deltaMessagesTotal != nil {
-                                deltaMessagesTotal.Add(ctx, 1)
-                        }
-                        span.SetAttributes(attribute.Int("message.size", len(message)))
-                        span.End()
-                }
+		if deltaMessagesTotal != nil {
+			deltaMessagesTotal.Add(ctx, 1)
+		}
+		span.SetAttributes(attribute.Int("message.size", len(message)))
+		span.End()
 
 		// Check for the new message format with payload.channels
 		var channel string
@@ -239,7 +225,6 @@ func (c *DeltaWebsocketClient) readPump() {
 		// Call the handler for the channel
 		c.handlersMu.RLock()
 		c.totalMessages++
-		fmt.Println("Delta_WS: readPump: Channel:", channel, "product:", msgProductID, "Message count:", c.totalMessages)
 		// for ch := range c.handlers {
 		// 	fmt.Printf("Delta_WS: readPump: Registered handler for channel: %s\n", ch)
 		// }
@@ -277,7 +262,6 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 	// Marshal the message
 	data, err := json.Marshal(msg)
 	if err != nil {
-		fmt.Println("Delta_WS: Subscribe: Error marshalling subscription message:", err)
 		return fmt.Errorf("failed to marshal subscription message: %w", err)
 	}
 
@@ -422,6 +406,5 @@ func (c *DeltaWebsocketClient) getSubscribedChannels() []string {
 		channels = append(channels, channel)
 	}
 
-	fmt.Println("Delta_WS: getSubscribedChannels: Subscribed channels:", channels)
 	return channels
 }
