@@ -112,13 +112,13 @@ func (c *DeltaWebsocketClient) Connect() error {
 	// Start the read pump
 	go c.readPump()
 
-	// // Subscribe to channels (without holding the lock)
-	// for _, channel := range c.channels {
-	// 	fmt.Println("Delta_WS: Connect: Subscribing to channel:", channel)
-	// 	if err := c.Subscribe(channel, c.productIDs); err != nil {
-	// 		log.Printf("Failed to subscribe to channel %s: %v", channel, err)
-	// 	}
-	// }
+	// Subscribe to channels (without holding the lock)
+	for _, channel := range c.channels {
+		fmt.Println("Delta_WS: Connect: Subscribing to channel:", channel)
+		if err := c.Subscribe(channel, c.productIDs); err != nil {
+			log.Printf("Failed to subscribe to channel %s: %v", channel, err)
+		}
+	}
 
 	return nil
 }
