@@ -201,7 +201,12 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 	for _, client := range clientsCopy {
 		// Ensure the client is still subscribed
 		h.subscriptionsMu.RLock()
-		if _, still := h.subscriptions[channel][client]; !still {
+		channelClients, channelExists := h.subscriptions[channel]
+		if !channelExists {
+			h.subscriptionsMu.RUnlock()
+			continue
+		}
+		if _, still := channelClients[client]; !still {
 			h.subscriptionsMu.RUnlock()
 			continue
 		}
