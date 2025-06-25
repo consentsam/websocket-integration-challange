@@ -8,6 +8,16 @@ DOCKER := docker
 DOCKER_IMAGE := cryptovate/$(SERVICE_NAME)
 DOCKER_TAG := latest
 
+# Detect if vendor directory exists for offline builds
+VENDOR_DIR := vendor
+ifneq (,$(wildcard $(VENDOR_DIR)))
+    GO_BUILD_FLAGS := -mod=vendor
+    GO_TEST_FLAGS := -mod=vendor
+else
+    GO_BUILD_FLAGS := 
+    GO_TEST_FLAGS := 
+endif
+
 # Go build flags
 LDFLAGS := -ldflags "-s -w"
 
@@ -21,11 +31,11 @@ all: clean deps proto build
 
 .PHONY: run
 run:
-	$(GO) run main.go
+	$(GO) run $(GO_BUILD_FLAGS) main.go
 
 .PHONY: build
 build:
-	$(GO) build $(LDFLAGS) -o $(SERVICE_NAME) main.go
+	$(GO) build $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(SERVICE_NAME) main.go
 
 .PHONY: clean
 clean:
@@ -34,8 +44,19 @@ clean:
 
 .PHONY: deps
 deps:
+ifneq (,$(wildcard $(VENDOR_DIR)))
+	@echo "📦 Using vendored dependencies (offline mode)"
+else
+	@echo "📥 Downloading dependencies (online mode)"
 	$(GO) mod download
 	$(GO) mod tidy
+endif
+
+.PHONY: vendor
+vendor:
+	@echo "📦 Creating vendor directory for offline builds..."
+	$(GO) mod vendor
+	@echo "✅ Vendor directory created. Commit this for CODEX compatibility."
 
 # Protocol Buffers
 .PHONY: proto
@@ -55,11 +76,11 @@ docker-run:
 # Testing
 .PHONY: test
 test:
-	$(GO) test -v ./...
+	$(GO) test $(GO_TEST_FLAGS) -v ./...
 
 .PHONY: test-coverage
 test-coverage:
-	$(GO) test -v -coverprofile=coverage.out ./...
+	$(GO) test $(GO_TEST_FLAGS) -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 # Development
@@ -74,7 +95,7 @@ ci: build vet staticcheck test-race proto-check
 
 .PHONY: vet
 vet:
-	$(GO) vet ./...
+	$(GO) vet $(GO_BUILD_FLAGS) ./...
 
 .PHONY: staticcheck
 staticcheck:
@@ -82,7 +103,7 @@ staticcheck:
 
 .PHONY: test-race
 test-race:
-	$(GO) test -race ./...
+	$(GO) test $(GO_TEST_FLAGS) -race ./...
 
 .PHONY: proto-check
 proto-check:
@@ -104,7 +125,8 @@ help:
 	@echo "  run            - Run the service"
 	@echo "  build          - Build the service"
 	@echo "  clean          - Remove build artifacts"
-	@echo "  deps           - Download dependencies"
+	@echo "  deps           - Download dependencies (or use vendor if available)"
+	@echo "  vendor         - Create vendor directory for offline builds"
 	@echo "  proto          - Generate code from Protocol Buffers"
 	@echo "  docker-build   - Build Docker image"
 	@echo "  docker-run     - Run Docker container"
@@ -117,3 +139,6 @@ help:
 	@echo "  staticcheck    - Run staticcheck linter"
 	@echo "  proto-check    - Verify protobuf code is up to date"
 	@echo "  help           - Show this help"
+	@echo ""
+	@echo "Offline builds:"
+	@echo "  When vendor/ directory exists, builds will use -mod=vendor for offline compatibility"

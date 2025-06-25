@@ -174,3 +174,29 @@ Using the phrase above (replace `<n>` with 1-7) in a PR description or chat mess
 | PR     | `telemetry: phase-<n> – <short-title>`    | `telemetry: phase-1 core bootstrap`   |
 
 Follow the existing review, merge and escalation rules (Sections 4, 10 & 11) for all telemetry work. 
+
+---
+## 14. Offline Builds & CODEX Compatibility
+
+Since CODEX (ChatGPT) environments don't have internet access, the repository includes a `vendor/` directory with all Go dependencies for offline builds.
+
+### 14.1 How It Works
+- **With internet** (local development): `make ci` downloads dependencies as needed
+- **Without internet** (CODEX): `make ci` automatically uses vendored dependencies with `-mod=vendor`
+
+### 14.2 Maintaining Vendor Directory
+When dependencies change, update the vendor directory:
+```bash
+make vendor
+git add vendor/ go.mod go.sum
+git commit -m "vendor: update dependencies for CODEX compatibility"
+```
+
+### 14.3 Makefile Auto-Detection
+The `Makefile` automatically detects if `vendor/` exists and switches to offline mode:
+- ✅ **Offline mode**: Uses `-mod=vendor` flags when `vendor/` directory exists
+- 📥 **Online mode**: Downloads dependencies when `vendor/` directory is missing
+
+This ensures both local development and CODEX environments work seamlessly.
+
+---
