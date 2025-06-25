@@ -39,21 +39,32 @@ mkdir -p "$GOPATH"/{bin,src,pkg}
 # 2. INSTALL PROTOC & GO TOOLS
 # =============================================================================
 log_info "🔧 Installing protoc..."
-if ! command -v protoc &> /dev/null; then
+if ! command -v protoc &> /dev/null || [[ "$(protoc --version | grep -oP '\d+\.\d+')" < "28.0" ]]; then
     cd /tmp
     wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
     unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
     sudo cp bin/protoc /usr/local/bin/ && sudo cp -r include/* /usr/local/include/
     rm -rf bin include readme.txt "protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+    log_success "protoc ${PROTOC_VERSION} installed"
+else
+    log_success "protoc is available"
 fi
 
 log_info "🛠️ Installing Go development tools..."
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest &
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest &
 go install honnef.co/go/tools/cmd/staticcheck@latest &
-go install github.com/cosmtrek/air@latest &
+go install github.com/air-verse/air@latest &
 go install golang.org/x/tools/cmd/goimports@latest &
 wait
+
+# Verify critical tools are installed
+log_info "🔍 Verifying tools..."
+if ! command -v protoc-gen-go &> /dev/null || ! command -v protoc-gen-go-grpc &> /dev/null; then
+    log_error "Protoc Go plugins failed to install!"
+    exit 1
+fi
+log_success "All tools installed"
 
 # =============================================================================
 # 3. SETUP ENVIRONMENT & PROJECT
@@ -65,11 +76,22 @@ cd /workspace
 
 log_info "📦 Setting up project..."
 [ -f "go.mod" ] && { go mod download; go mod tidy; }
-[ -f "Makefile" ] && make proto
+
+# Ensure protoc plugins are in PATH
+export PATH="$GOBIN:$PATH"
+
+# Generate protobuf code (this fixes Bug #01)
+if [ -f "Makefile" ]; then
+    log_info "🔄 Generating protobuf code..."
+    make proto || { log_error "Proto generation failed!"; exit 1; }
+else
+    log_error "Makefile not found!"
+    exit 1
+fi
 
 log_info "🔍 Testing build..."
-if [ -f "Makefile" ] && ! make build &> /dev/null; then
-    log_error "Build failed! Check your setup."
+if ! make build; then
+    log_error "Build failed! Check the output above."
     exit 1
 fi
 
