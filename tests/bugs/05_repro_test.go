@@ -4,92 +4,66 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"fmt"
-	"strings"
 
-	"github.com/spf13/viper"
 	"github.com/consentsam/websocket-integration-challange/internal/config"
 )
 
-// loadConfigWithAbsolutePath loads config using absolute paths to avoid race conditions
-func loadConfigWithAbsolutePath(serviceName string, projectRoot string) (*config.Config, error) {
-	// Detect environment
-	environment := os.Getenv("ENVIRONMENT")
-	if environment == "" {
-		environment = "local"
-	}
-
-	// Set default configuration values (copied from config.LoadConfig)
-	cfg := &config.Config{
-		ServiceName: serviceName,
-		Environment: environment,
-		LogLevel:    "info",
-		HTTPPort:    8083,
-		GRPCPort:    9093,
-	}
-
-	// Set default metrics configuration
-	cfg.Metrics.Enabled = true
-	cfg.Metrics.Endpoint = "/metrics"
-
-	// Initialize Viper with absolute paths
-	v := viper.New()
-	v.SetConfigName(environment)
-	v.SetConfigType("yaml")
-	
-	// Use absolute path to config directory
-	configDir := filepath.Join(projectRoot, "config")
-	v.AddConfigPath(configDir)
-	v.AddConfigPath(projectRoot)
-
-	// Set environment variable support
-	v.SetEnvPrefix("WEBSOCKET")
-	v.AutomaticEnv()
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	// Try to read the configuration file
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Config file not found, continue with defaults
-		} else {
-			return nil, fmt.Errorf("error reading config file: %w", err)
-		}
-	}
-
-	// Unmarshal the configuration
-	if err := v.Unmarshal(cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	return cfg, nil
-}
-
+// TestBug05_Repro ensures that config.LoadConfig correctly reads the YAML configuration
+// file for the detected environment (defaulting to "local") and that the HTTP/GRPC
+// port values can be overridden via the HTTP_PORT and GRPC_PORT environment variables.
 func TestBug05_Repro(t *testing.T) {
-	os.Setenv("ENVIRONMENT", "local")
-	defer os.Unsetenv("ENVIRONMENT")
+	// Force the ENVIRONMENT to "local" so that local.yaml is chosen.
+	t.Setenv("ENVIRONMENT", "local")
 
-	// Get the current working directory and calculate project root
+	// Determine project root so we can chdir there – config.LoadConfig expects the
+	// ./config directory to be relative to the working directory.
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get current working directory: %v", err)
 	}
-
-	// Calculate the project root path (go up two levels from tests/bugs/)
 	projectRoot, err := filepath.Abs(filepath.Join(cwd, "..", ".."))
 	if err != nil {
 		t.Fatalf("failed to resolve absolute path to project root: %v", err)
 	}
 
-	// Load config using absolute paths - no directory changes needed!
-	cfg, err := loadConfigWithAbsolutePath("websocket-service", projectRoot)
+	// Change to the project root for the duration of this test so the config loader
+	// can locate ./config/local.yaml regardless of where the test was started from.
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to capture working directory: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("failed to chdir to project root: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// 1. Verify values loaded from YAML without overrides.
+	cfg, err := config.LoadConfig("websocket-service")
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-
 	if cfg.HTTPPort != 8080 {
-		t.Fatalf("expected HTTP port 8080, got %d", cfg.HTTPPort)
+		t.Fatalf("expected HTTP port 8080 from YAML, got %d", cfg.HTTPPort)
 	}
 	if cfg.GRPCPort != 9090 {
-		t.Fatalf("expected gRPC port 9090, got %d", cfg.GRPCPort)
+		t.Fatalf("expected gRPC port 9090 from YAML, got %d", cfg.GRPCPort)
+	}
+	if !cfg.Delta.Enabled {
+		t.Fatalf("expected Delta section to be initialised; got %+v", cfg.Delta)
+	}
+
+	// 2. Verify environment variable overrides take precedence.
+	t.Setenv("HTTP_PORT", "8888")
+	t.Setenv("GRPC_PORT", "9999")
+
+	cfg, err = config.LoadConfig("websocket-service")
+	if err != nil {
+		t.Fatalf("failed to load config with overrides: %v", err)
+	}
+	if cfg.HTTPPort != 8888 {
+		t.Fatalf("expected HTTP port override 8888, got %d", cfg.HTTPPort)
+	}
+	if cfg.GRPCPort != 9999 {
+		t.Fatalf("expected gRPC port override 9999, got %d", cfg.GRPCPort)
 	}
 }
