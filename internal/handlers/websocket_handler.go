@@ -581,24 +581,21 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 					// Remove the client subscription first
 					h.unsubscribeClient(client, channelName)
 
-					// After removal, check if Delta client should also unsubscribe
+					// After removal, check if Delta client should also unsubscribe (i.e. no remaining clients)
 					if h.deltaClient != nil {
-						if channel, ok := msg["type"].(string); ok {
-							if channel == "unsubscribe" {
-								h.subscriptionsMu.RLock()
-								if clients, ok := h.subscriptions[channelName]; ok {
-									if len(clients) == 0 {
-										h.subscriptionsMu.RUnlock()
-										h.deltaClient.Unsubscribe(channelName)
-									} else {
-										fmt.Println("WS_handler: Delta: still ", len(clients), " clients subscribed to channel: ", channelName)
-										h.subscriptionsMu.RUnlock()
-									}
-								} else {
-									h.subscriptionsMu.RUnlock()
-									h.deltaClient.Unsubscribe(channelName)
-								}
-							}
+						// Determine if any clients remain subscribed to this channel
+						h.subscriptionsMu.RLock()
+						clientsRemaining, hasSubscribers := h.subscriptions[channelName]
+						count := 0
+						if hasSubscribers {
+							count = len(clientsRemaining)
+						}
+						h.subscriptionsMu.RUnlock()
+
+						if !hasSubscribers {
+							h.deltaClient.Unsubscribe(channelName)
+						} else {
+							fmt.Println("WS_handler: Delta: still ", count, " clients subscribed to channel: ", channelName)
 						}
 					}
 				}
