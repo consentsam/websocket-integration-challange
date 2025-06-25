@@ -9,6 +9,16 @@ import (
 )
 
 func TestBug06_Repro(t *testing.T) {
+	// capture original environment variable value
+	originalEnv, envWasSet := os.LookupEnv("ENVIRONMENT")
+	defer func() {
+		if envWasSet {
+			os.Setenv("ENVIRONMENT", originalEnv)
+		} else {
+			os.Unsetenv("ENVIRONMENT")
+		}
+	}()
+	
 	os.Setenv("ENVIRONMENT", "local")
 	// run from temporary directory to mimic installed binary location
 	wd, err := os.Getwd()
