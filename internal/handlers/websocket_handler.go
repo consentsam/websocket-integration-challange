@@ -53,9 +53,10 @@ type WebsocketHandler struct {
 }
 
 var (
-        tracer          = otel.Tracer("websocket-service")
-        broadcastTotal  metric.Int64Counter
-        broadcastLatency metric.Int64Histogram
+        tracer            = otel.Tracer("websocket-service")
+        broadcastTotal    metric.Int64Counter
+        broadcastLatency  metric.Int64Histogram
+        telemetryReady    bool
 )
 
 func init() {
@@ -63,11 +64,14 @@ func init() {
         broadcastTotal, err = telemetry.Counter("broadcast_total")
         if err != nil {
                 log.Printf("telemetry counter init failed: %v", err)
+                return
         }
         broadcastLatency, err = telemetry.Histogram("broadcast_latency_ms")
         if err != nil {
                 log.Printf("telemetry histogram init failed: %v", err)
+                return
         }
+        telemetryReady = true
 }
 
 // NewWebsocketHandler creates a new websocket handler
@@ -160,7 +164,7 @@ func (h *WebsocketHandler) HandleWebsocket(w http.ResponseWriter, r *http.Reques
 
 // BroadcastToChannel broadcasts a message to all clients subscribed to a channel
 func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, productID string) {
-        telemetryEnabled := strings.ToLower(os.Getenv("TELEMETRY_PHASE_3_ENABLED")) != "false"
+        telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_3_ENABLED")) != "false"
 
         // Get the clients subscribed to the channel
         h.subscriptionsMu.RLock()
