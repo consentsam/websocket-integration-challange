@@ -116,7 +116,7 @@ Each phase is independent; merge on green CI.
 - [x] **Phase 4b** – error counter in `run()` default drop path.
 - [ ] **Phase 5** – wrap gRPC server with `otelgrpc` interceptor.
 - [ ] **Phase 6** – panic recovery middleware + `go_panic_total`.
-- [ ] Build & run **docker-compose telemetry demo**; validate metrics & traces.
-- [ ] Commit dashboards JSON & PrometheusRule manifests to `deploy/telemetry/`.
+- [x] Build & run **docker-compose telemetry demo**; validate metrics & traces.
+- [x] Commit dashboards JSON & PrometheusRule manifests to `deploy/telemetry/`.
 
 > **When every box is ticked, telemetry work is complete and we can close bugs #05 (port mismatch clues via metrics), #07 (metrics endpoint), #11 (JSON errors surfaced) and guard against #03/#10 concurrency panics.** 
