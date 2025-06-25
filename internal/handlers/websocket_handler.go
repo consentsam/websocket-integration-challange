@@ -178,13 +178,18 @@ func (h *WebsocketHandler) HandleWebsocket(w http.ResponseWriter, r *http.Reques
 // BroadcastToChannel broadcasts a message to all clients subscribed to a channel
 func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, productID string) {
 
-	// Get the clients subscribed to the channel
+	// Safely copy the subscribed clients for iteration
 	h.subscriptionsMu.RLock()
-	clients, ok := h.subscriptions[channel]
-	h.subscriptionsMu.RUnlock()
+	clientsMap, ok := h.subscriptions[channel]
 	if !ok {
+		h.subscriptionsMu.RUnlock()
 		return
 	}
+	clientsCopy := make([]*Client, 0, len(clientsMap))
+	for c := range clientsMap {
+		clientsCopy = append(clientsCopy, c)
+	}
+	h.subscriptionsMu.RUnlock()
 
 	var span trace.Span
 	ctx := h.ctx
@@ -193,7 +198,19 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 	start = time.Now()
 
 	// Broadcast the message to all clients subscribed to the channel
-	for client := range clients {
+	for _, client := range clientsCopy {
+		// Ensure the client is still subscribed
+		h.subscriptionsMu.RLock()
+		channelClients, channelExists := h.subscriptions[channel]
+		if !channelExists {
+			h.subscriptionsMu.RUnlock()
+			continue
+		}
+		if _, still := channelClients[client]; !still {
+			h.subscriptionsMu.RUnlock()
+			continue
+		}
+		h.subscriptionsMu.RUnlock()
 		// Check if the client has a product filter for the channel
 		client.mu.RLock()
 		clientProductIDs, hasFilter := client.productFilters[channel]
