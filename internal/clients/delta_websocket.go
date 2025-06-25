@@ -196,7 +196,9 @@ func (c *DeltaWebsocketClient) readPump() {
                 if err := json.Unmarshal(message, &msg); err != nil {
                         log.Printf("Error parsing message from Delta Exchange: %v", err)
                         if telemetryEnabled {
-                                jsonUnmarshalErr.Add(ctx, 1)
+                                if jsonUnmarshalErr != nil {
+                                        jsonUnmarshalErr.Add(ctx, 1)
+                                }
                                 span.RecordError(err)
                                 span.End()
                         }
@@ -204,7 +206,9 @@ func (c *DeltaWebsocketClient) readPump() {
                 }
 
                 if telemetryEnabled {
-                        deltaMessagesTotal.Add(ctx, 1)
+                        if deltaMessagesTotal != nil {
+                                deltaMessagesTotal.Add(ctx, 1)
+                        }
                         span.SetAttributes(attribute.Int("message.size", len(message)))
                         span.End()
                 }
