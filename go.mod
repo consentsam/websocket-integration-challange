@@ -1,4 +1,4 @@
-module github.com/Cryptovate-India/websocket-service
+module github.com/consentsam/websocket-integration-challange
 
 go 1.22.0
 

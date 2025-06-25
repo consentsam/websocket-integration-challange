@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Cryptovate-India/websocket-service/internal/config"
+	"github.com/consentsam/websocket-integration-challange/internal/config"
 	"github.com/gorilla/websocket"
 )
 

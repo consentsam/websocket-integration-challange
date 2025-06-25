@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	websocketv1 "github.com/Cryptovate-India/websocket-service/gen/websocket/api/v1"
-	"github.com/Cryptovate-India/websocket-service/internal/config"
-	"github.com/Cryptovate-India/websocket-service/internal/handlers"
+	websocketv1 "github.com/consentsam/websocket-integration-challange/gen/websocket/api/v1"
+	"github.com/consentsam/websocket-integration-challange/internal/config"
+	"github.com/consentsam/websocket-integration-challange/internal/handlers"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	websocketv1 "github.com/Cryptovate-India/websocket-service/gen/websocket/api/v1"
-	"github.com/Cryptovate-India/websocket-service/internal/config"
-	"github.com/Cryptovate-India/websocket-service/internal/handlers"
-	"github.com/Cryptovate-India/websocket-service/internal/server"
+	websocketv1 "github.com/consentsam/websocket-integration-challange/gen/websocket/api/v1"
+	"github.com/consentsam/websocket-integration-challange/internal/config"
+	"github.com/consentsam/websocket-integration-challange/internal/handlers"
+	"github.com/consentsam/websocket-integration-challange/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
