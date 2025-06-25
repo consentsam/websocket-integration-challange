@@ -12,7 +12,10 @@ Fix, test and merge every documented bug (`docs/bugs/**/*.md` and `docs/bugs-pha
 2. Each bug ⇒ dedicated feature branch: `bug/<bug-id>-<kebab-title>`  
    Example: `bug/03-race-condition-websocket-handler`.
 3. Keep documentation in sync with code (update bug index, status fields, counters).
-4. Squash-merge every PR via GitHub UI.
+4. Create a resolved-bug report under `docs/bug-fix/` once the fix is merged.  
+   File name format: `<bug-id>-<kebab-title>-resolved.md` (e.g. `01-bug-01-missing-proto-generation-resolved.md`).
+5. **Trigger phrase**: asking `RESOLVE THE BUG <bug-file>` kicks off the automated fix workflow.
+5. Squash-merge every PR via GitHub UI.
 
 ---
 ## 3. Development Workflow (TL;DR)
@@ -34,6 +37,7 @@ make test -race | cat
 #    ‑ follow Recommended Fix in markdown file
 #    ‑ update Status in bug file → Fixed
 #    ‑ run `make proto` if proto files changed
+#    ‑ create resolved report in docs/bug-fix/<bug-id>-<title>-resolved.md
 
 # 4. Verify locally
 make ci                    # build, vet, lint, tests, race, proto-diff
@@ -55,6 +59,7 @@ Detailed per-bug steps are documented in section 8.
 - [ ] `make ci` passes (build + vet + staticcheck + tests ‑race + proto diff clean).
 - [ ] New or updated tests cover the fix (failing on `dev` / passing on branch).
 - [ ] Documentation updated (bug Status, overview counters, CHANGELOG if needed).
+- [ ] Resolved report added under `docs/bug-fix/` with verification steps.
 - [ ] At least one reviewer approval.
 
 ---
@@ -112,3 +117,29 @@ Detailed per-bug steps are documented in section 8.
 ---
 ## 11. Fallback / Escalation
 If CI fails with a non-trivial race or flaky test, label the PR `needs-investigation` in a comment. 
+
+---
+## 12. Bug-Fix Documentation (`docs/bug-fix/`)
+
+Every resolved bug **must** include a standalone markdown report located at `docs/bug-fix/<bug-id>-<kebab-title>-resolved.md`.
+
+**Required sections:**
+
+| Section | Purpose |
+|---------|---------|
+| Header  | Copy original bug header (ID, Severity, Date) + add `Status: Resolved` |
+| Summary | Short description of root cause & fix approach |
+| Code Changes | Bullet list of affected files / functions |
+| Tests Added | Paths to new/updated `*_test.go` files |
+| Verification | CLI commands to reproduce failure on `dev` & success on branch |
+| Checklist | Tick-box PR checklist (mirrors Section 4) |
+
+Include any diagrams, logs, or links that help reviewers understand the fix.  Place binary assets (e.g. PNG) in `docs/bug-fix/assets/`.
+
+---
+### Deep-Wiki & API Docs locations
+
+* Internal architecture docs live under `docs/deepwiki-docs/`
+* External API reference snapshots live under `docs/delta-exchange-api-docs/`
+
+Refer to these paths when cross-linking from resolved reports. 
