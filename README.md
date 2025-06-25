@@ -87,6 +87,18 @@ The service can be configured using YAML configuration files in the `config` dir
 - Go plugins for Protocol Buffers
 - Access to the `github.com/Cryptovate-India/server-utils` package
 
+#### Installing protoc
+
+macOS:
+```bash
+brew install protobuf
+```
+
+Ubuntu/Debian:
+```bash
+sudo apt-get install protobuf-compiler
+```
+
 ### Setup
 
 1. Clone the repository
