@@ -330,7 +330,10 @@ func (h *WebsocketHandler) run() {
 			}
 			h.subscriptionsMu.Unlock()
 		case message := <-h.broadcast:
-			// Broadcast the message to all clients
+			// Broadcast the message to all clients. Collect failed clients
+			// first while holding the read lock, then remove them with a
+			// write lock to avoid concurrent map access races.
+			var failedClients []*Client
 			h.clientsMu.RLock()
 			for client := range h.clients {
 				select {
@@ -342,10 +345,18 @@ func (h *WebsocketHandler) run() {
 					traceID := trace.SpanContextFromContext(h.ctx).TraceID().String()
 					log.Printf("dropping client message due to full buffer: trace_id=%s", traceID)
 					close(client.send)
-					delete(h.clients, client)
+					failedClients = append(failedClients, client)
 				}
 			}
 			h.clientsMu.RUnlock()
+
+			if len(failedClients) > 0 {
+				h.clientsMu.Lock()
+				for _, client := range failedClients {
+					delete(h.clients, client)
+				}
+				h.clientsMu.Unlock()
+			}
 		}
 	}
 }
@@ -446,13 +457,13 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			for i := 0; i < n; i++ {
 				msg := <-client.send
 				if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				span.RecordError(err)
-				if clientDeliveryTotal != nil {
-					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					span.RecordError(err)
+					if clientDeliveryTotal != nil {
+						clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					}
+					span.End()
+					return
 				}
-				span.End()
-				return
-			}
 				totalBytes += len(msg)
 				atomic.AddInt64(&h.messagesSent, 1)
 			}
