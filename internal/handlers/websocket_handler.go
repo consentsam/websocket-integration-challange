@@ -1,18 +1,25 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-	"sync"
-	"sync/atomic"
-	"time"
+        "context"
+        "encoding/json"
+        "fmt"
+        "log"
+        "net/http"
+        "os"
+        "strings"
+        "sync"
+        "sync/atomic"
+        "time"
 
-	"github.com/consentsam/websocket-integration-challange/internal/clients"
-	"github.com/consentsam/websocket-integration-challange/internal/config"
-	"github.com/gorilla/websocket"
+        "github.com/consentsam/websocket-integration-challange/internal/clients"
+        "github.com/consentsam/websocket-integration-challange/internal/config"
+        "github.com/consentsam/websocket-integration-challange/telemetry"
+        "github.com/gorilla/websocket"
+        "go.opentelemetry.io/otel"
+        "go.opentelemetry.io/otel/attribute"
+        "go.opentelemetry.io/otel/metric"
+        "go.opentelemetry.io/otel/trace"
 )
 
 // Client represents a connected websocket client
@@ -29,20 +36,38 @@ type Client struct {
 
 // WebsocketHandler handles websocket connections
 type WebsocketHandler struct {
-	upgrader         websocket.Upgrader
-	clients          map[*Client]bool
-	clientsMu        sync.RWMutex
-	broadcast        chan []byte
-	register         chan *Client
-	unregister       chan *Client
-	subscriptions    map[string]map[*Client]bool
-	subscriptionsMu  sync.RWMutex
-	config           *config.Config
-	deltaClient      *clients.DeltaWebsocketClient
-	ctx              context.Context
-	cancel           context.CancelFunc
-	messagesSent     int64
-	messagesReceived int64
+        upgrader         websocket.Upgrader
+        clients          map[*Client]bool
+        clientsMu        sync.RWMutex
+        broadcast        chan []byte
+        register         chan *Client
+        unregister       chan *Client
+        subscriptions    map[string]map[*Client]bool
+        subscriptionsMu  sync.RWMutex
+        config           *config.Config
+        deltaClient      *clients.DeltaWebsocketClient
+        ctx              context.Context
+        cancel           context.CancelFunc
+        messagesSent     int64
+        messagesReceived int64
+}
+
+var (
+        tracer          = otel.Tracer("websocket-service")
+        broadcastTotal  metric.Int64Counter
+        broadcastLatency metric.Int64Histogram
+)
+
+func init() {
+        var err error
+        broadcastTotal, err = telemetry.Counter("broadcast_total")
+        if err != nil {
+                log.Printf("telemetry counter init failed: %v", err)
+        }
+        broadcastLatency, err = telemetry.Histogram("broadcast_latency_ms")
+        if err != nil {
+                log.Printf("telemetry histogram init failed: %v", err)
+        }
 }
 
 // NewWebsocketHandler creates a new websocket handler
@@ -135,23 +160,30 @@ func (h *WebsocketHandler) HandleWebsocket(w http.ResponseWriter, r *http.Reques
 
 // BroadcastToChannel broadcasts a message to all clients subscribed to a channel
 func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, productID string) {
-	// Get the clients subscribed to the channel
-	h.subscriptionsMu.RLock()
-	// fmt.Println("WS_Handler: Broadcase: Broadcasting to channel:", channel)
-	// fmt.Println("WS_Handler: Broadcast: total subscribers:", len(h.subscriptions))
-	// Get the list of clients subscribed to the channel
-	clients, ok := h.subscriptions[channel]
-	h.subscriptionsMu.RUnlock()
-	if !ok {
-		return
-	}
+        telemetryEnabled := strings.ToLower(os.Getenv("TELEMETRY_PHASE_3_ENABLED")) != "false"
 
-	// Broadcast the message to all clients subscribed to the channel
-	for client := range clients {
-		// Check if the client has a product filter for the channel
-		client.mu.RLock()
-		clientProductIDs, hasFilter := client.productFilters[channel]
-		client.mu.RUnlock()
+        // Get the clients subscribed to the channel
+        h.subscriptionsMu.RLock()
+        clients, ok := h.subscriptions[channel]
+        h.subscriptionsMu.RUnlock()
+        if !ok {
+                return
+        }
+
+        var span trace.Span
+        ctx := h.ctx
+        var start time.Time
+        if telemetryEnabled {
+                ctx, span = tracer.Start(ctx, "broadcast.filter")
+                start = time.Now()
+        }
+
+        // Broadcast the message to all clients subscribed to the channel
+        for client := range clients {
+                // Check if the client has a product filter for the channel
+                client.mu.RLock()
+                clientProductIDs, hasFilter := client.productFilters[channel]
+                client.mu.RUnlock()
 
 		// fmt.Println("WS_Handler: Broadcast: reading product ids:", clientProductIDs)
 
@@ -172,15 +204,23 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 			}
 		}
 
-		fmt.Println("WS_Handler: Broadcast: sending message to client:", client.id, "on channel:", channel, "for product:", productID)
+                fmt.Println("WS_Handler: Broadcast: sending message to client:", client.id, "on channel:", channel, "for product:", productID)
 
-		// Send the message to the client
-		select {
-		case client.send <- message:
-		default:
-			h.unregister <- client
-		}
-	}
+                // Send the message to the client
+                select {
+                case client.send <- message:
+                default:
+                        h.unregister <- client
+                }
+        }
+
+        if telemetryEnabled {
+                elapsed := time.Since(start).Milliseconds()
+                broadcastTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", channel)))
+                broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
+                span.SetAttributes(attribute.String("channel", channel))
+                span.End()
+        }
 }
 
 // GetDeltaConnectionStatus gets the connection status of the Delta Exchange client
