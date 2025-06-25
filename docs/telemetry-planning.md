@@ -115,7 +115,7 @@ Each phase is independent; merge on green CI.
 - [x] **Phase 4** – instrument `writePump` (span, counters, bytes).
 - [x] **Phase 4b** – error counter in `run()` default drop path.
 - [ ] **Phase 5** – wrap gRPC server with `otelgrpc` interceptor.
-- [ ] **Phase 6** – panic recovery middleware + `go_panic_total`.
+- [x] **Phase 6** – panic recovery middleware + `go_panic_total`.
 - [ ] Build & run **docker-compose telemetry demo**; validate metrics & traces.
 - [ ] Commit dashboards JSON & PrometheusRule manifests to `deploy/telemetry/`.
 
