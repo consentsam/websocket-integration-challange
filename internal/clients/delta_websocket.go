@@ -1,15 +1,22 @@
 package clients
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"sync"
-	"time"
+        "context"
+        "encoding/json"
+        "fmt"
+        "log"
+        "os"
+        "strings"
+        "sync"
+        "time"
 
-	"github.com/consentsam/websocket-integration-challange/internal/config"
-	"github.com/gorilla/websocket"
+        "github.com/consentsam/websocket-integration-challange/internal/config"
+       "github.com/consentsam/websocket-integration-challange/telemetry"
+       "github.com/gorilla/websocket"
+       "go.opentelemetry.io/otel"
+       "go.opentelemetry.io/otel/attribute"
+       "go.opentelemetry.io/otel/metric"
+       "go.opentelemetry.io/otel/trace"
 )
 
 // MessageHandler is a function that handles messages from Delta Exchange
@@ -35,7 +42,25 @@ type DeltaWebsocketClient struct {
 	mu              sync.RWMutex
 	subscriptions   map[string]bool
 	subscriptionsMu sync.RWMutex
-	totalMessages   int
+        totalMessages   int
+}
+
+var (
+        tracer            = otel.Tracer("websocket-service")
+        deltaMessagesTotal metric.Int64Counter
+        jsonUnmarshalErr   metric.Int64Counter
+)
+
+func init() {
+        var err error
+        deltaMessagesTotal, err = telemetry.Counter("delta_messages_total")
+        if err != nil {
+                log.Printf("telemetry counter init failed: %v", err)
+        }
+        jsonUnmarshalErr, err = telemetry.Counter("json_unmarshal_errors_total")
+        if err != nil {
+                log.Printf("telemetry counter init failed: %v", err)
+        }
 }
 
 // NewDeltaWebsocketClient creates a new Delta Exchange websocket client
@@ -142,24 +167,47 @@ func (c *DeltaWebsocketClient) readPump() {
 		}
 	}()
 
-	for {
-		_, message, err := conn.ReadMessage()
-		// fmt.Println("Delta_WS: readPump: Read message:", string(message))
-		if err != nil {
-			// Update error state with lock
+        telemetryEnabled := strings.ToLower(os.Getenv("TELEMETRY_PHASE_2_ENABLED")) != "false"
+
+        for {
+                ctx := c.ctx
+                var span trace.Span
+                if telemetryEnabled {
+                        ctx, span = tracer.Start(ctx, "delta.receive")
+                }
+
+                _, message, err := conn.ReadMessage()
+                // fmt.Println("Delta_WS: readPump: Read message:", string(message))
+                if err != nil {
+                        // Update error state with lock
 			c.mu.Lock()
 			c.lastError = fmt.Sprintf("Error reading from Delta Exchange: %v", err)
 			c.lastErrorAt = time.Now()
-			c.mu.Unlock()
-			return
-		}
+                        c.mu.Unlock()
+                        if telemetryEnabled {
+                                span.RecordError(err)
+                                span.End()
+                        }
+                        return
+                }
 
-		// Parse the message to get the channel
-		var msg map[string]interface{}
-		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("Error parsing message from Delta Exchange: %v", err)
-			continue
-		}
+                // Parse the message to get the channel
+                var msg map[string]interface{}
+                if err := json.Unmarshal(message, &msg); err != nil {
+                        log.Printf("Error parsing message from Delta Exchange: %v", err)
+                        if telemetryEnabled {
+                                jsonUnmarshalErr.Add(ctx, 1)
+                                span.RecordError(err)
+                                span.End()
+                        }
+                        continue
+                }
+
+                if telemetryEnabled {
+                        deltaMessagesTotal.Add(ctx, 1)
+                        span.SetAttributes(attribute.Int("message.size", len(message)))
+                        span.End()
+                }
 
 		// Check for the new message format with payload.channels
 		var channel string
