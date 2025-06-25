@@ -72,7 +72,20 @@ log_success "All tools installed"
 export GO111MODULE=on GOPROXY=https://proxy.golang.org,direct
 export WEBSOCKET_AUTH_SECRET="dev-secret-$(date +%s)"
 
-cd /workspace
+# Find the project directory (CODEX clones to /workspace/)
+if [ -d "/workspace" ] && [ -f "/workspace/Makefile" ]; then
+    PROJECT_DIR="/workspace"
+elif [ -f "./Makefile" ]; then
+    PROJECT_DIR="$(pwd)"
+else
+    log_error "Project not found! Ensure the repository is cloned to /workspace/ or run from project root"
+    log_info "Current directory: $(pwd)"
+    log_info "Contents: $(ls -la)"
+    exit 1
+fi
+
+cd "$PROJECT_DIR"
+log_info "📁 Working in: $PROJECT_DIR"
 
 log_info "📦 Setting up project..."
 [ -f "go.mod" ] && { go mod download; go mod tidy; }
@@ -81,13 +94,8 @@ log_info "📦 Setting up project..."
 export PATH="$GOBIN:$PATH"
 
 # Generate protobuf code (this fixes Bug #01)
-if [ -f "Makefile" ]; then
-    log_info "🔄 Generating protobuf code..."
-    make proto || { log_error "Proto generation failed!"; exit 1; }
-else
-    log_error "Makefile not found!"
-    exit 1
-fi
+log_info "🔄 Generating protobuf code..."
+make proto || { log_error "Proto generation failed!"; exit 1; }
 
 log_info "🔍 Testing build..."
 if ! make build; then
