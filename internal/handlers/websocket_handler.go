@@ -43,7 +43,7 @@ type WebsocketHandler struct {
 	subscriptions    map[string]map[*Client]bool
 	subscriptionsMu  sync.RWMutex
 	config           *config.Config
-	deltaClient      *clients.DeltaWebsocketClient
+	deltaClient      clients.DeltaClient
 	ctx              context.Context
 	cancel           context.CancelFunc
 	messagesSent     int64
@@ -140,6 +140,11 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 	go handler.run()
 
 	return handler
+}
+
+// SetDeltaClient allows injecting a custom Delta client (primarily for tests).
+func (h *WebsocketHandler) SetDeltaClient(dc clients.DeltaClient) {
+	h.deltaClient = dc
 }
 
 // HandleWebsocket handles a websocket connection
@@ -446,13 +451,13 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			for i := 0; i < n; i++ {
 				msg := <-client.send
 				if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				span.RecordError(err)
-				if clientDeliveryTotal != nil {
-					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					span.RecordError(err)
+					if clientDeliveryTotal != nil {
+						clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					}
+					span.End()
+					return
 				}
-				span.End()
-				return
-			}
 				totalBytes += len(msg)
 				atomic.AddInt64(&h.messagesSent, 1)
 			}
@@ -573,25 +578,29 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 
 					chName = channelName
 
+					// Remove the client subscription first
+					h.unsubscribeClient(client, channelName)
+
+					// After removal, check if Delta client should also unsubscribe
 					if h.deltaClient != nil {
 						if channel, ok := msg["type"].(string); ok {
 							if channel == "unsubscribe" {
-								//check if no other subscriptions exist for this channel
+								h.subscriptionsMu.RLock()
 								if clients, ok := h.subscriptions[channelName]; ok {
 									if len(clients) == 0 {
-										// Unsubscribe the client from the channel
+										h.subscriptionsMu.RUnlock()
 										h.deltaClient.Unsubscribe(channelName)
 									} else {
+										fmt.Println("WS_handler: Delta: still ", len(clients), " clients subscribed to channel: ", channelName)
+										h.subscriptionsMu.RUnlock()
 									}
 								} else {
-									// Unsubscribe the client from the channel
+									h.subscriptionsMu.RUnlock()
 									h.deltaClient.Unsubscribe(channelName)
 								}
 							}
 						}
 					}
-					// Subscribe the client to the channel
-					h.unsubscribeClient(client, channelName)
 				}
 			}
 		}
