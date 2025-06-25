@@ -64,6 +64,25 @@ func NewTestClient() *Client {
 	}
 }
 
+// NewBlockedTestClient creates a test Client whose send channel is already full
+// to simulate an unresponsive peer. This helps trigger the broadcast drop path
+// in tests.
+func NewBlockedTestClient() *Client {
+	now := time.Now()
+	ch := make(chan []byte, 1)
+	ch <- []byte("block")
+	return &Client{
+		conn:           nil,
+		send:           ch,
+		subscriptions:  make(map[string]bool),
+		productFilters: make(map[string][]string),
+		mu:             sync.RWMutex{},
+		id:             fmt.Sprintf("blocked-%d", now.UnixNano()),
+		connectedAt:    now,
+		lastActivity:   now,
+	}
+}
+
 // GetDeltaClient exposes the current DeltaClient instance.
 func (h *WebsocketHandler) GetDeltaClient() clients.DeltaClient {
 	return h.deltaClient
