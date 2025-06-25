@@ -56,6 +56,7 @@ var (
 	tracer              = otel.Tracer("websocket-service")
 	broadcastTotal      metric.Int64Counter
 	broadcastLatency    metric.Int64Histogram
+	broadcastDropTotal  metric.Int64Counter
 	clientDeliveryTotal metric.Int64Counter
 	clientBytesSent     metric.Int64Counter
 	telemetryReady      bool
@@ -71,6 +72,11 @@ func init() {
 	broadcastLatency, err = telemetry.Histogram("broadcast_latency_ms")
 	if err != nil {
 		log.Printf("telemetry histogram init failed: %v", err)
+		return
+	}
+	broadcastDropTotal, err = telemetry.Counter("broadcast_drop_total")
+	if err != nil {
+		log.Printf("telemetry counter init failed: %v", err)
 		return
 	}
 	clientDeliveryTotal, err = telemetry.Counter("client_delivery_total")
@@ -314,6 +320,7 @@ func (h *WebsocketHandler) run() {
 		}
 	}()
 
+	telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_4_ENABLED")) != "false"
 	for {
 		select {
 		case <-h.ctx.Done():
@@ -350,6 +357,11 @@ func (h *WebsocketHandler) run() {
 				select {
 				case client.send <- message:
 				default:
+					if telemetryEnabled {
+						broadcastDropTotal.Add(h.ctx, 1)
+						traceID := trace.SpanContextFromContext(h.ctx).TraceID().String()
+						log.Printf("dropping client message due to full buffer: trace_id=%s", traceID)
+					}
 					close(client.send)
 					delete(h.clients, client)
 				}
