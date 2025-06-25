@@ -22,12 +22,12 @@
 ### `go.mod` lines (add once)
 ```
 require (
-	go.opentelemetry.io/otel v1.21.0
-	go.opentelemetry.io/otel/sdk v1.21.0
-	go.opentelemetry.io/otel/exporters/jaeger v1.21.0
-	go.opentelemetry.io/contrib/exporters/metric/prometheus v0.44.1
-	github.com/prometheus/client_golang v1.18.0
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.44.1
+	go.opentelemetry.io/otel v1.34.0
+	go.opentelemetry.io/otel/sdk v1.34.0
+	go.opentelemetry.io/otel/exporters/jaeger v1.17.0
+	go.opentelemetry.io/otel/exporters/prometheus v0.58.0
+	github.com/prometheus/client_golang v1.20.5
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.58.0
 )
 ```
 
