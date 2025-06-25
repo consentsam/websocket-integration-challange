@@ -10,7 +10,12 @@ When creating a new CODEX environment, select:
 - **Python**: `3.12` (for any tooling)
 - **Node.js**: `20` (for any web tooling)
 
-### 2. Run Setup Script
+### 2. Ensure Correct Branch
+**IMPORTANT**: Make sure CODEX clones the `dev-phase-02` branch (where the bug work happens):
+- Repository: `https://github.com/consentsam/websocket-integration-challange.git`
+- Branch: `dev-phase-02`
+
+### 3. Run Setup Script
 ```bash
 # Navigate to project directory
 cd /workspace
