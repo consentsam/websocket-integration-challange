@@ -59,4 +59,4 @@ git push origin bug/03-race-condition-websocket-handler
 ---
 
 **Setup time: ~1 minute**  
-**Ready to fix 12 documented bugs!** 🎯 
+**Ready to fix 12 documented bugs!** 🎯
