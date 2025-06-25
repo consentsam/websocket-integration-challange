@@ -9,11 +9,11 @@ import (
 var Meter = otel.Meter("websocket-service")
 
 // Counter creates an int64 counter with the provided name and options.
-func Counter(name string, opts ...metric.InstrumentOption) (metric.Int64Counter, error) {
+func Counter(name string, opts ...metric.Int64CounterOption) (metric.Int64Counter, error) {
 	return Meter.Int64Counter(name, opts...)
 }
 
 // Histogram creates an int64 histogram with the provided name and options.
-func Histogram(name string, opts ...metric.InstrumentOption) (metric.Int64Histogram, error) {
+func Histogram(name string, opts ...metric.Int64HistogramOption) (metric.Int64Histogram, error) {
 	return Meter.Int64Histogram(name, opts...)
 }
