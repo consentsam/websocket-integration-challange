@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,7 +57,6 @@ var (
 	broadcastDropTotal  metric.Int64Counter
 	clientDeliveryTotal metric.Int64Counter
 	clientBytesSent     metric.Int64Counter
-	telemetryReady      bool
 )
 
 func init() {
@@ -89,7 +86,6 @@ func init() {
 		log.Printf("telemetry counter init failed: %v", err)
 		return
 	}
-	telemetryReady = true
 }
 
 // NewWebsocketHandler creates a new websocket handler
@@ -125,10 +121,6 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 		cancel:        cancel,
 	}
 
-	fmt.Println("Websocket handler created")
-	fmt.Println("Websocket handler config:", cfg)
-	fmt.Println("Websocket handler context:", handlerCtx)
-
 	// Create the Delta Exchange client if enabled
 	if cfg.Delta.Enabled {
 		handler.deltaClient = clients.NewDeltaWebsocketClient(handlerCtx, &cfg.Delta)
@@ -138,11 +130,9 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 		// 	handler.registerDeltaHandler(channel)
 		// }
 
-		fmt.Println("WS_handler:ctor: Delta Exchange client created")
-
 		// Connect to Delta Exchange
 		if err := handler.deltaClient.Connect(); err != nil {
-			fmt.Println("Failed to connect to Delta Exchange: ", err)
+			log.Printf("Failed to connect to Delta Exchange: %v", err)
 		}
 	}
 
@@ -182,7 +172,6 @@ func (h *WebsocketHandler) HandleWebsocket(w http.ResponseWriter, r *http.Reques
 
 // BroadcastToChannel broadcasts a message to all clients subscribed to a channel
 func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, productID string) {
-	telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_3_ENABLED")) != "false"
 
 	// Get the clients subscribed to the channel
 	h.subscriptionsMu.RLock()
@@ -195,10 +184,8 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 	var span trace.Span
 	ctx := h.ctx
 	var start time.Time
-	if telemetryEnabled {
-		ctx, span = tracer.Start(ctx, "broadcast.filter")
-		start = time.Now()
-	}
+	ctx, span = tracer.Start(ctx, "broadcast.filter")
+	start = time.Now()
 
 	// Broadcast the message to all clients subscribed to the channel
 	for client := range clients {
@@ -207,16 +194,10 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 		clientProductIDs, hasFilter := client.productFilters[channel]
 		client.mu.RUnlock()
 
-		// fmt.Println("WS_Handler: Broadcast: reading product ids:", clientProductIDs)
-
-		// If the client has a product filter, check if the message matches the filter
 		if hasFilter && len(clientProductIDs) > 0 {
-			// Check if any of the product IDs match
-			fmt.Println("WS_Handler: Broadcast: checking product ids:", productID, "in clientProductIDs:", clientProductIDs)
 			match := false
 			for _, clientProductID := range clientProductIDs {
 				if productID == clientProductID {
-					fmt.Println("WS_Handler: Broadcast: found a match for product id:", productID, "in clientProductIDs:", clientProductIDs)
 					match = true
 					break
 				}
@@ -226,8 +207,6 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 			}
 		}
 
-		fmt.Println("WS_Handler: Broadcast: sending message to client:", client.id, "on channel:", channel, "for product:", productID)
-
 		// Send the message to the client
 		select {
 		case client.send <- message:
@@ -236,13 +215,15 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 		}
 	}
 
-	if telemetryEnabled {
-		elapsed := time.Since(start).Milliseconds()
+	elapsed := time.Since(start).Milliseconds()
+	if broadcastTotal != nil {
 		broadcastTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", channel)))
-		broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
-		span.SetAttributes(attribute.String("channel", channel))
-		span.End()
 	}
+	if broadcastLatency != nil {
+		broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
+	}
+	span.SetAttributes(attribute.String("channel", channel))
+	span.End()
 }
 
 // GetDeltaConnectionStatus gets the connection status of the Delta Exchange client
@@ -320,7 +301,6 @@ func (h *WebsocketHandler) run() {
 		}
 	}()
 
-	telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_4_ENABLED")) != "false"
 	for {
 		select {
 		case <-h.ctx.Done():
@@ -331,7 +311,6 @@ func (h *WebsocketHandler) run() {
 			h.clientsMu.Unlock()
 		case client := <-h.unregister:
 			h.clientsMu.Lock()
-			fmt.Println("WS_Handler: unregistering client")
 
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
@@ -357,11 +336,11 @@ func (h *WebsocketHandler) run() {
 				select {
 				case client.send <- message:
 				default:
-					if telemetryEnabled {
+					if broadcastDropTotal != nil {
 						broadcastDropTotal.Add(h.ctx, 1)
-						traceID := trace.SpanContextFromContext(h.ctx).TraceID().String()
-						log.Printf("dropping client message due to full buffer: trace_id=%s", traceID)
 					}
+					traceID := trace.SpanContextFromContext(h.ctx).TraceID().String()
+					log.Printf("dropping client message due to full buffer: trace_id=%s", traceID)
 					close(client.send)
 					delete(h.clients, client)
 				}
@@ -431,34 +410,30 @@ func (h *WebsocketHandler) writePump(client *Client) {
 		client.conn.Close()
 	}()
 
-	telemetryEnabled := telemetryReady && strings.ToLower(os.Getenv("TELEMETRY_PHASE_4_ENABLED")) != "false"
-
 	for {
 		select {
 		case message, ok := <-client.send:
 			ctx := h.ctx
 			var span trace.Span
-			if telemetryEnabled {
-				ctx, span = tracer.Start(ctx, "client.write")
-			}
+			ctx, span = tracer.Start(ctx, "client.write")
 			client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
 				// The hub closed the channel
 				client.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				if telemetryEnabled {
+				if clientDeliveryTotal != nil {
 					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "closed")))
-					span.End()
 				}
+				span.End()
 				return
 			}
 
 			w, err := client.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
-				if telemetryEnabled {
-					span.RecordError(err)
+				span.RecordError(err)
+				if clientDeliveryTotal != nil {
 					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
-					span.End()
 				}
+				span.End()
 				return
 			}
 			bytesWritten, _ := w.Write(message)
@@ -479,18 +454,20 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			}
 
 			if err := w.Close(); err != nil {
-				if telemetryEnabled {
-					span.RecordError(err)
+				span.RecordError(err)
+				if clientDeliveryTotal != nil {
 					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
-					span.End()
 				}
+				span.End()
 				return
 			}
-			if telemetryEnabled {
+			if clientDeliveryTotal != nil {
 				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "ok")))
-				clientBytesSent.Add(ctx, int64(totalBytes))
-				span.End()
 			}
+			if clientBytesSent != nil {
+				clientBytesSent.Add(ctx, int64(totalBytes))
+			}
+			span.End()
 		case <-ticker.C:
 			client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -502,7 +479,6 @@ func (h *WebsocketHandler) writePump(client *Client) {
 
 // handleSubscribe handles a subscribe message
 func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interface{}) {
-	fmt.Println("subscribing a message: ", msg)
 
 	var chName string = ""
 	// Check if the message has the new format with payload.channels
@@ -538,8 +514,6 @@ func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interf
 						}
 					}
 
-					fmt.Println("subscribing to channel: ", channelName)
-					fmt.Println("subscribing to product IDs: ", productIDs)
 					chName = channelName
 
 					// Check if deltaClient has not registered for this channel then register first.
@@ -547,7 +521,6 @@ func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interf
 						if channel, ok := msg["type"].(string); ok {
 							if channel == "subscribe" {
 								h.registerDeltaHandler(channelName)
-								fmt.Println("WS_handler: Delta: subscribing to channel: ", channelName)
 								h.deltaClient.Subscribe(channelName, productIDs)
 							}
 						}
@@ -582,8 +555,6 @@ func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interf
 		return
 	}
 
-	fmt.Println("sending subscription confirmation: ", string(data))
-
 	client.send <- data
 }
 
@@ -604,25 +575,21 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 						continue
 					}
 
-					fmt.Println("subscribing to channel: ", channelName)
 					chName = channelName
 
 					if h.deltaClient != nil {
 						if channel, ok := msg["type"].(string); ok {
 							if channel == "unsubscribe" {
-								fmt.Println("WS_handler: Delta: unsubscribing from channel: ", channelName)
 								//check if no other subscriptions exist for this channel
 								if clients, ok := h.subscriptions[channelName]; ok {
 									if len(clients) == 0 {
 										// Unsubscribe the client from the channel
 										h.deltaClient.Unsubscribe(channelName)
 									} else {
-										fmt.Println("WS_handler: Delta: still ", len(clients), " clients subscribed to channel: ", channelName)
 									}
 								} else {
 									// Unsubscribe the client from the channel
 									h.deltaClient.Unsubscribe(channelName)
-									fmt.Println("WS_handler: Delta: unsubscribed from channel: ", channelName)
 								}
 							}
 						}

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -21,38 +20,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
-
-// isTelemetryPhase5Enabled checks if telemetry phase 5 is enabled via environment variable.
-// It follows standard boolean environment variable conventions:
-// - Unset or empty: false (disabled)
-// - Truthy values ("true", "1", "yes", "on", "enable"): true (enabled)
-// - Falsy values ("false", "0", "no", "off", "disable"): false (disabled)
-func isTelemetryPhase5Enabled() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("TELEMETRY_PHASE_5_ENABLED")))
-	switch value {
-	case "true", "1", "yes", "on", "enable":
-		return true
-	case "", "false", "0", "no", "off", "disable":
-		return false
-	default:
-		// For any other values, default to false (disabled)
-		return false
-	}
-}
-
-// isTelemetryPhase6Enabled checks if telemetry phase 6 is enabled via environment variable.
-// It follows the same boolean conventions as other phases.
-func isTelemetryPhase6Enabled() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("TELEMETRY_PHASE_6_ENABLED")))
-	switch value {
-	case "true", "1", "yes", "on", "enable":
-		return true
-	case "", "false", "0", "no", "off", "disable":
-		return false
-	default:
-		return false
-	}
-}
 
 func main() {
 
@@ -89,10 +56,7 @@ func main() {
 	defer websocketHandler.Close()
 
 	// Create the gRPC server with optional telemetry interceptor (phase 5)
-	grpcOpts := []grpc.ServerOption{}
-	if isTelemetryPhase5Enabled() {
-		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()))
-	}
+	grpcOpts := []grpc.ServerOption{grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor())}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	websocketServer := server.NewServer(ctx, cfg, websocketHandler)
 	websocketv1.RegisterWebsocketServiceServer(grpcServer, websocketServer)
@@ -123,11 +87,8 @@ func main() {
 		mux.Handle(cfg.Metrics.Endpoint, metricsMux)
 	}
 
-	// Wrap with panic recovery middleware if phase 6 is enabled
-	handler := http.Handler(mux)
-	if isTelemetryPhase6Enabled() {
-		handler = telemetry.RecoveryMiddleware(handler)
-	}
+	// Wrap with panic recovery middleware
+	handler := telemetry.RecoveryMiddleware(mux)
 
 	// Start the HTTP server
 	httpServer := &http.Server{

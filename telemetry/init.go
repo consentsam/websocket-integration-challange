@@ -2,10 +2,7 @@ package telemetry
 
 import (
 	"context"
-	"log"
 	"net/http"
-	"os"
-	"strings"
 
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -18,11 +15,6 @@ import (
 
 // Init configures global telemetry providers and returns a mux exposing /metrics.
 func Init(ctx context.Context, cfg *config.Config) (*http.ServeMux, error) {
-	if strings.ToLower(os.Getenv("TELEMETRY_PHASE_1_ENABLED")) == "false" {
-		return nil, nil
-	}
-
-	log.Printf("telemetry phase 1 enabled")
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
