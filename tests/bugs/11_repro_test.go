@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -17,10 +16,6 @@ import (
 
 // TestBug11_Repro verifies that messages are not batched into malformed JSON.
 func TestBug11_Repro(t *testing.T) {
-	if os.Getenv("CI") == "true" {
-		t.Skip("Regression test; passes post-fix")
-	}
-
 	cfg, err := config.LoadConfig("websocket-service")
 	if err != nil {
 		t.Fatalf("load config: %v", err)
