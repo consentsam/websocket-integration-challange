@@ -192,10 +192,15 @@ git add vendor/ go.mod go.sum
 git commit -m "vendor: update dependencies for CODEX compatibility"
 ```
 
-### 14.3 Makefile Auto-Detection
+### 14.3 Makefile Auto-Detection & Protobuf Compatibility
 The `Makefile` automatically detects if `vendor/` exists and switches to offline mode:
 - ✅ **Offline mode**: Uses `-mod=vendor` flags when `vendor/` directory exists
 - 📥 **Online mode**: Downloads dependencies when `vendor/` directory is missing
+
+**Protobuf Version Compatibility:**
+- `proto-check` target ignores protoc version differences in generated file comments
+- Local dev (protoc v5.29.3) vs CODEX (protoc v5.27.1) differences are automatically ignored
+- Only actual code changes in protobuf files will cause CI failures
 
 This ensures both local development and CODEX environments work seamlessly.
 
