@@ -83,8 +83,12 @@ func main() {
 	})
 
 	// Add metrics endpoint if enabled
+	log.Printf("Metrics configuration: Enabled=%v, Endpoint=%s", cfg.Metrics.Enabled, cfg.Metrics.Endpoint)
 	if cfg.Metrics.Enabled && metricsMux != nil {
+		log.Printf("Registering metrics endpoint at %s", cfg.Metrics.Endpoint)
 		mux.Handle(cfg.Metrics.Endpoint, metricsMux)
+	} else {
+		log.Printf("Metrics endpoint disabled in configuration")
 	}
 
 	// Wrap with panic recovery middleware
