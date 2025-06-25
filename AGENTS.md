@@ -93,7 +93,6 @@ Detailed per-bug steps are documented in section 8.
 6. **Docs** – mark bug as `Fixed`, update overview counts.
 7. **Push & PR** – PR auto-fills template; complete checklist.
 8. **Review & Merge** – squash merge once green.
-9. **Branch Cleanup** – delete remote branch.
 
 ---
 ## 9. Tooling Commands (quick reference)
@@ -203,5 +202,292 @@ The `Makefile` automatically detects if `vendor/` exists and switches to offline
 - Only actual code changes in protobuf files will cause CI failures
 
 This ensures both local development and CODEX environments work seamlessly.
+
+---
+## 15. Verification Workflow for CODEX/ChatGPT Environment
+
+When working with CODEX in ChatGPT by OpenAI, follow this verification workflow to ensure changes work correctly in the offline environment.
+
+### 15.1 Pre-Verification Setup
+```bash
+# Ensure offline builds work
+make ci                    # Full CI pipeline (works offline)
+make build                 # Build the service binary
+```
+
+### 15.2 Telemetry Verification Workflow
+
+#### **Step 1: Service Startup Verification**
+```bash
+# Test service starts without errors
+timeout 3 ./websocket-service 2>&1 | head -10
+
+# Expected output should show:
+# - Configuration loading from YAML
+# - Metrics endpoint enabled
+# - No panic or startup errors
+```
+
+#### **Step 2: Metrics Endpoint Verification**
+```bash
+# Start service in background
+./websocket-service &
+SERVICE_PID=$!
+
+# Wait for startup
+sleep 2
+
+# Verify metrics endpoint responds
+curl -f http://localhost:8080/metrics > /dev/null && echo "✅ Metrics OK" || echo "❌ Metrics FAIL"
+
+# Check specific metrics are present
+curl -s http://localhost:8080/metrics | grep -E "delta_messages_total|broadcast_total|go_panic_total" | head -5
+
+# Clean up
+kill $SERVICE_PID 2>/dev/null || true
+```
+
+#### **Step 3: Configuration Verification**  
+```bash
+# Test different environments
+ENVIRONMENT=development timeout 3 ./websocket-service 2>&1 | grep -E "config|port|metrics"
+
+# Test environment variable overrides
+WEBSOCKET_HTTP_PORT=9999 timeout 3 ./websocket-service 2>&1 | grep "HTTP Port: 9999"
+
+# Test metrics disable
+WEBSOCKET_METRICS_ENABLED=false timeout 3 ./websocket-service 2>&1 | grep "Metrics Enabled: false"
+```
+
+### 15.3 Code Change Verification
+
+#### **For Bug Fixes:**
+```bash
+# 1. Verify fix compiles
+make build
+
+# 2. Run specific tests (if race-related)
+go test -race ./internal/handlers/ -v
+
+# 3. Run full test suite
+make test
+
+# 4. Verify no new lint issues
+make lint
+```
+
+#### **For Telemetry Changes:**
+```bash
+# 1. Verify no build errors
+go build -o websocket-service .
+
+# 2. Check telemetry initialization
+./websocket-service 2>&1 | head -5 | grep -E "telemetry|metrics"
+
+# 3. Validate metrics schema
+curl -s http://localhost:8080/metrics | grep "^# HELP" | head -10
+
+# 4. Test panic recovery (if implemented)
+# This would be tested through specific test cases
+```
+
+### 15.4 Integration Testing in CODEX
+
+#### **WebSocket Functionality Test:**
+```bash
+# Start service
+./websocket-service &
+SERVICE_PID=$!
+sleep 2
+
+# Test WebSocket endpoint accessibility (connection test)
+# Note: Full WebSocket testing requires external tools not available in CODEX
+# But we can verify the service accepts connections on the right port
+netstat -ln | grep :8080 || ss -ln | grep :8080
+
+# Verify gRPC port
+netstat -ln | grep :9090 || ss -ln | grep :9090
+
+kill $SERVICE_PID 2>/dev/null || true
+```
+
+#### **Error Handling Verification:**
+```bash
+# Test service handles invalid config gracefully
+echo "invalid: yaml: content" > /tmp/invalid.yaml
+WEBSOCKET_CONFIG_FILE=/tmp/invalid.yaml timeout 3 ./websocket-service 2>&1 | grep -i error
+
+# Test service handles missing config
+ENVIRONMENT=nonexistent timeout 3 ./websocket-service 2>&1
+```
+
+### 15.5 Documentation Verification
+
+#### **Verify Documentation Changes:**
+```bash
+# Check markdown syntax
+# (In CODEX, visual inspection of markdown is needed)
+
+# Verify file references exist
+ls -la docs/telemetry-implementation.md
+ls -la docs/telemetry-quick-reference.md
+
+# Check that documentation examples work
+grep -A 5 "curl.*metrics" docs/telemetry-quick-reference.md
+```
+
+### 15.6 Common CODEX Verification Patterns
+
+#### **Quick Health Check:**
+```bash
+# One-liner service health verification
+./websocket-service & sleep 2 && curl -f http://localhost:8080/metrics >/dev/null && echo "✅ Service + Metrics OK" || echo "❌ Failed"; pkill -f websocket-service 2>/dev/null
+```
+
+#### **Configuration Matrix Test:**
+```bash
+# Test all environment configs exist and load
+for env in local development production; do
+  echo "Testing $env..."
+  ENVIRONMENT=$env timeout 2 ./websocket-service 2>&1 | grep -E "config|port" | head -3
+  echo "---"
+done
+```
+
+#### **Metrics Completeness Check:**
+```bash
+# Verify all expected metrics are exported
+./websocket-service & sleep 2
+EXPECTED_METRICS="delta_messages_total json_unmarshal_errors_total broadcast_total broadcast_latency_ms client_delivery_total go_panic_total"
+for metric in $EXPECTED_METRICS; do
+  curl -s http://localhost:8080/metrics | grep -q "$metric" && echo "✅ $metric" || echo "❌ $metric MISSING"
+done
+pkill -f websocket-service 2>/dev/null
+```
+
+### 15.7 Troubleshooting CODEX Issues
+
+#### **Common Problems & Solutions:**
+
+| Problem | Symptom | Solution |
+|---------|---------|----------|
+| **Build fails** | `go: module not found` | Run `make deps` or `go mod vendor` |
+| **Service won't start** | `panic: invalid pattern` | Check configuration loading in logs |
+| **Metrics empty** | `/metrics` returns 200 but no data | Verify Prometheus exporter setup |
+| **Port conflicts** | `bind: address already in use` | Use different ports or kill existing processes |
+| **Config not loading** | Uses wrong values | Check YAML file paths and env vars |
+
+#### **Debug Commands:**
+```bash
+# Check what ports are in use
+netstat -tlnp 2>/dev/null | grep -E ":808[0-9]|:909[0-9]" || ss -tlnp | grep -E ":808[0-9]|:909[0-9]"
+
+# Verify service binary
+file ./websocket-service
+ldd ./websocket-service 2>/dev/null || otool -L ./websocket-service 2>/dev/null || echo "Static binary"
+
+# Check configuration file loading
+strace -e openat ./websocket-service 2>&1 | grep -E "\.yaml" | head -5 2>/dev/null || \
+dtruss -n ./websocket-service 2>&1 | grep -E "\.yaml" | head -5 2>/dev/null || \
+echo "Config loading verification requires system tracing tools"
+```
+
+### 15.8 Final Verification Checklist for CODEX
+
+Before considering any change complete in CODEX environment:
+
+- [ ] **Build**: `make ci` passes without internet connectivity
+- [ ] **Startup**: Service starts without errors and logs configuration
+- [ ] **Endpoints**: HTTP/gRPC ports are accessible
+- [ ] **Metrics**: `/metrics` endpoint returns valid Prometheus data
+- [ ] **Config**: Environment variables and YAML files load correctly
+- [ ] **Tests**: Relevant test cases pass with `-race` flag
+- [ ] **Documentation**: Examples in docs actually work when executed
+- [ ] **Cleanup**: No orphaned processes or temp files left behind
+
+This verification workflow ensures that changes made through CODEX in ChatGPT are production-ready and function correctly in offline environments.
+
+---
+## 16. Merge-Order Playbook
+
+When multiple bug-fix branches touch overlapping files, follow this playbook to avoid merge hell and preserve a linear history.
+
+### 16.1 Golden Rules
+1. **Rebase, don't merge**: Always `git rebase origin/main` before opening (or refreshing) a PR.  
+   *Why?* Keeps history clean and prevents multi-merge diamonds.
+2. **Resolve conflicts locally** (never in the GitHub UI). Use:
+```bash
+git rebase origin/main               # interactive if needed
+git mergetool                        # or resolve by hand
+make ci                               # ensure build still green
+git push --force-with-lease           # update PR safely
+```
+3. **Enable rerere** once per workstation so Git remembers conflict resolutions:
+```bash
+git config --global rerere.enabled true
+```
+4. **Generated code in a separate commit**: If you regenerate protobufs or mocks, push them in a follow-up commit (`chore(proto): regenerate`) so the *functional* changes stay conflict-friendly.
+
+### 16.2 Typical Conflict Scenarios & Fixes
+| Scenario | Symptom | Fix |
+|----------|---------|-----|
+| Two bug branches edit the same Go file | `<<<<<<< HEAD` markers | Rebase latest, accept both fixes, run `goimports` |
+| Proto files regenerated in both branches | Large diff in `*_pb.go` | Keep newer proto, re-run `make proto`, commit generated surge |
+| Docs conflict in bug overview table | Table row duplicated | Keep both rows, re-sort by Bug-ID |
+
+### 16.3 PR Merge Order Guidance
+1. **Critical severity first** (Section 2 labels).  
+2. **Smaller diff size wins** if severity equal.  
+3. **Conflicting branches**: merge the one that touches *fewer* files first, then the larger one rebases.
+
+---
+## 17. Reproduction Test Isolation
+
+Every bug MUST supply a failing _reproduction test_ that demonstrates the issue before the fix.  To avoid test-name clashes and ensure clarity, adopt the following rules.
+
+### 17.1 File & Function Naming
+| Item | Rule | Example |
+|------|------|---------|
+| Test file | `tests/bugs/<bug-id>_repro_test.go` | `tests/bugs/03_repro_test.go` |
+| Test func | `TestBug<id>_Repro` | `TestBug03_Repro` |
+
+### 17.2 Lifecycle
+1. **Initial commit**: Test fails (RED) on `dev` branch.  
+2. **Fix commit**: Test passes (GREEN) on bug branch.  
+3. **Post-merge**: Convert test to **skipped mode** so main stays green _but regression is tracked_.
+```go
+func TestBug03_Repro(t *testing.T) {
+    if os.Getenv("CI") == "true" { t.Skip("Regression test; passes post-fix") }
+    // original assertions here
+}
+```
+
+### 17.3 CI Integration
+* `make ci` treats any test under `tests/bugs/` that **is not skipped** as a failure.  
+* Regression tests run nightly via the `schedule.yml` workflow to ensure no future regressions.
+
+---
+## 18. Automated Bug Index & Counters
+
+Manual counting of open vs fixed bugs is error-prone when many issues are tackled in parallel.  A tiny helper tool keeps the index in sync.
+
+### 18.1 Usage
+```bash
+# Generate a fresh index table & counts
+go run ./cmd/bugindex > docs/bugs/00-overview_of_bugs.md
+```
+The command parses every markdown file under `docs/bugs/**` and `docs/bugs-phase-02/**`, extracts the front-matter fields (`ID`, `Title`, `Severity`, `Status`) and emits an updated overview table with aggregate counters.
+
+### 18.2 Makefile Target
+Add once per clone:
+```bash
+make bug-index        # Wrapper for the go run command above
+```
+
+### 18.3 Implementation Notes
+* Located at `cmd/bugindex/main.go` (see source).
+* Ignores files under `docs/bug-fix/`.
+* Treats statuses case-insensitively: `Open|Fixed|In Progress`.
+* Fails CI if counts in overview don't match reality (prevents stale docs).
 
 ---

@@ -446,13 +446,13 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			for i := 0; i < n; i++ {
 				msg := <-client.send
 				if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					span.RecordError(err)
-					if clientDeliveryTotal != nil {
-						clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
-					}
-					span.End()
-					return
+				span.RecordError(err)
+				if clientDeliveryTotal != nil {
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
 				}
+				span.End()
+				return
+			}
 				totalBytes += len(msg)
 				atomic.AddInt64(&h.messagesSent, 1)
 			}
