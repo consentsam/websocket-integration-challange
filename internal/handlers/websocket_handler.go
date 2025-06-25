@@ -216,8 +216,12 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 	}
 
 	elapsed := time.Since(start).Milliseconds()
-	broadcastTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", channel)))
-	broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
+	if broadcastTotal != nil {
+		broadcastTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", channel)))
+	}
+	if broadcastLatency != nil {
+		broadcastLatency.Record(ctx, elapsed, metric.WithAttributes(attribute.String("channel", channel)))
+	}
 	span.SetAttributes(attribute.String("channel", channel))
 	span.End()
 }
@@ -332,7 +336,9 @@ func (h *WebsocketHandler) run() {
 				select {
 				case client.send <- message:
 				default:
-					broadcastDropTotal.Add(h.ctx, 1)
+					if broadcastDropTotal != nil {
+						broadcastDropTotal.Add(h.ctx, 1)
+					}
 					traceID := trace.SpanContextFromContext(h.ctx).TraceID().String()
 					log.Printf("dropping client message due to full buffer: trace_id=%s", traceID)
 					close(client.send)
@@ -414,7 +420,9 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			if !ok {
 				// The hub closed the channel
 				client.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "closed")))
+				if clientDeliveryTotal != nil {
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "closed")))
+				}
 				span.End()
 				return
 			}
@@ -422,7 +430,9 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			w, err := client.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				span.RecordError(err)
-				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+				if clientDeliveryTotal != nil {
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+				}
 				span.End()
 				return
 			}
@@ -445,12 +455,18 @@ func (h *WebsocketHandler) writePump(client *Client) {
 
 			if err := w.Close(); err != nil {
 				span.RecordError(err)
-				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+				if clientDeliveryTotal != nil {
+					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+				}
 				span.End()
 				return
 			}
-			clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "ok")))
-			clientBytesSent.Add(ctx, int64(totalBytes))
+			if clientDeliveryTotal != nil {
+				clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "ok")))
+			}
+			if clientBytesSent != nil {
+				clientBytesSent.Add(ctx, int64(totalBytes))
+			}
 			span.End()
 		case <-ticker.C:
 			client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
