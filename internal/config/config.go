@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -92,6 +95,15 @@ func LoadConfig(serviceName string) (*Config, error) {
 	v.SetConfigType("yaml")
 	v.AddConfigPath("./config")
 	v.AddConfigPath(".")
+	if execPath, err := os.Executable(); err == nil {
+		execDir := filepath.Dir(execPath)
+		v.AddConfigPath(filepath.Join(execDir, "config"))
+		v.AddConfigPath(execDir)
+	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		base := filepath.Dir(filepath.Dir(filepath.Dir(file)))
+		v.AddConfigPath(filepath.Join(base, "config"))
+	}
 
 	// Set environment variable support
 	v.SetEnvPrefix("WEBSOCKET")
@@ -117,10 +129,33 @@ func LoadConfig(serviceName string) (*Config, error) {
 	// Update environment field to match what was detected/loaded
 	config.Environment = environment
 
-	// Log the configuration
+	// Log the configuration loaded from file
+	log.Printf("Loaded config - HTTP Port: %d, gRPC Port: %d", config.HTTPPort, config.GRPCPort)
+
+	// Check environment variable overrides without the WEBSOCKET_ prefix for convenience
+	if envHTTPPort := os.Getenv("HTTP_PORT"); envHTTPPort != "" {
+		if p, err := strconv.Atoi(envHTTPPort); err == nil {
+			log.Printf("HTTP_PORT environment override: %s", envHTTPPort)
+			config.HTTPPort = p
+		} else {
+			log.Printf("Invalid HTTP_PORT override: %v", err)
+		}
+	}
+	if envGRPCPort := os.Getenv("GRPC_PORT"); envGRPCPort != "" {
+		if p, err := strconv.Atoi(envGRPCPort); err == nil {
+			log.Printf("GRPC_PORT environment override: %s", envGRPCPort)
+			config.GRPCPort = p
+		} else {
+			log.Printf("Invalid GRPC_PORT override: %v", err)
+		}
+	}
+
+	// Validate final configuration
 	log.Printf("Loaded configuration for %s in %s environment", config.ServiceName, config.Environment)
 	log.Printf("HTTP Port: %d, gRPC Port: %d", config.HTTPPort, config.GRPCPort)
+
 	log.Printf("Metrics Enabled: %v, Endpoint: %s", config.Metrics.Enabled, config.Metrics.Endpoint)
+	log.Printf("Delta ProductIDs: %v", config.Delta.ProductIDs)
 
 	return config, nil
 }

@@ -43,7 +43,7 @@ type WebsocketHandler struct {
 	subscriptions    map[string]map[*Client]bool
 	subscriptionsMu  sync.RWMutex
 	config           *config.Config
-	deltaClient      *clients.DeltaWebsocketClient
+	deltaClient      clients.DeltaClient
 	ctx              context.Context
 	cancel           context.CancelFunc
 	messagesSent     int64
@@ -140,6 +140,11 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 	go handler.run()
 
 	return handler
+}
+
+// SetDeltaClient allows injecting a custom Delta client (primarily for tests).
+func (h *WebsocketHandler) SetDeltaClient(dc clients.DeltaClient) {
+	h.deltaClient = dc
 }
 
 // HandleWebsocket handles a websocket connection
@@ -330,7 +335,10 @@ func (h *WebsocketHandler) run() {
 			}
 			h.subscriptionsMu.Unlock()
 		case message := <-h.broadcast:
-			// Broadcast the message to all clients
+			// Broadcast the message to all clients. Collect failed clients
+			// first while holding the read lock, then remove them with a
+			// write lock to avoid concurrent map access races.
+			var failedClients []*Client
 			h.clientsMu.RLock()
 			for client := range h.clients {
 				select {
@@ -342,10 +350,18 @@ func (h *WebsocketHandler) run() {
 					traceID := trace.SpanContextFromContext(h.ctx).TraceID().String()
 					log.Printf("dropping client message due to full buffer: trace_id=%s", traceID)
 					close(client.send)
-					delete(h.clients, client)
+					failedClients = append(failedClients, client)
 				}
 			}
 			h.clientsMu.RUnlock()
+
+			if len(failedClients) > 0 {
+				h.clientsMu.Lock()
+				for _, client := range failedClients {
+					delete(h.clients, client)
+				}
+				h.clientsMu.Unlock()
+			}
 		}
 	}
 }
@@ -446,13 +462,13 @@ func (h *WebsocketHandler) writePump(client *Client) {
 			for i := 0; i < n; i++ {
 				msg := <-client.send
 				if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				span.RecordError(err)
-				if clientDeliveryTotal != nil {
-					clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					span.RecordError(err)
+					if clientDeliveryTotal != nil {
+						clientDeliveryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
+					}
+					span.End()
+					return
 				}
-				span.End()
-				return
-			}
 				totalBytes += len(msg)
 				atomic.AddInt64(&h.messagesSent, 1)
 			}
@@ -573,25 +589,26 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 
 					chName = channelName
 
+					// Remove the client subscription first
+					h.unsubscribeClient(client, channelName)
+
+					// After removal, check if Delta client should also unsubscribe (i.e. no remaining clients)
 					if h.deltaClient != nil {
-						if channel, ok := msg["type"].(string); ok {
-							if channel == "unsubscribe" {
-								//check if no other subscriptions exist for this channel
-								if clients, ok := h.subscriptions[channelName]; ok {
-									if len(clients) == 0 {
-										// Unsubscribe the client from the channel
-										h.deltaClient.Unsubscribe(channelName)
-									} else {
-									}
-								} else {
-									// Unsubscribe the client from the channel
-									h.deltaClient.Unsubscribe(channelName)
-								}
-							}
+						// Determine if any clients remain subscribed to this channel
+						h.subscriptionsMu.RLock()
+						clientsRemaining, hasSubscribers := h.subscriptions[channelName]
+						count := 0
+						if hasSubscribers {
+							count = len(clientsRemaining)
+						}
+						h.subscriptionsMu.RUnlock()
+
+						if !hasSubscribers {
+							h.deltaClient.Unsubscribe(channelName)
+						} else {
+							fmt.Println("WS_handler: Delta: still ", count, " clients subscribed to channel: ", channelName)
 						}
 					}
-					// Subscribe the client to the channel
-					h.unsubscribeClient(client, channelName)
 				}
 			}
 		}
