@@ -109,12 +109,17 @@ test-race:
 proto-check:
 	@echo "Checking if protobuf code is up to date..."
 	@$(MAKE) proto
-	@if git diff --exit-code > /dev/null 2>&1; then \
+	@if git diff --ignore-matching-lines="protoc.*v[0-9]" --exit-code gen/ > /dev/null 2>&1; then \
 		echo "✅ Protobuf code is up to date"; \
 	else \
 		echo "❌ Protobuf code is out of date. Run 'make proto' and commit changes."; \
-		git diff; \
-		exit 1; \
+		echo "Note: Ignoring protoc version differences between environments"; \
+		git diff --ignore-matching-lines="protoc.*v[0-9]" gen/; \
+		if git diff --ignore-matching-lines="protoc.*v[0-9]" --exit-code gen/ > /dev/null 2>&1; then \
+			echo "✅ Only protoc version differences found - this is expected in different environments"; \
+		else \
+			exit 1; \
+		fi; \
 	fi
 
 # Help
