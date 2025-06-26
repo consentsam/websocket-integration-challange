@@ -1,9 +1,4 @@
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: websocket-service-alerts
-spec:
-  groups:
+groups:
   - name: websocket.rules
     rules:
     - alert: BroadcastFailureRate
@@ -13,3 +8,10 @@ spec:
         severity: page
       annotations:
         summary: High broadcast drop rate detected
+    - alert: ServiceDown
+      expr: up{job="websocket-service"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: WebSocket service is down

@@ -1,17 +1,14 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Copy go.mod and go.sum files
-COPY go.mod go.sum ./
+# Copy the source code (including local dependencies)
+COPY . .
 
 # Download dependencies
 RUN go mod download
-
-# Copy the source code
-COPY . .
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o websocket-service .

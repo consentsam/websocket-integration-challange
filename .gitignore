@@ -45,3 +45,21 @@ tmp/
 temp/
 rough/
 docs/cursor-chats/
+
+# Scripts directory (organized separately)
+scripts/
+
+# Monitoring artifacts and temporary files
+*.json
+!go.mod
+!go.sum
+deployment-outputs.txt
+prometheus-*.yml
+grafana-*.json
+docker-compose.*.yml
+alerting-rules*.yml
+
+# Node.js artifacts
+node_modules/
+package-lock.json
+package.json

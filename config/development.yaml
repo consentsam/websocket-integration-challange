@@ -12,15 +12,15 @@ websocket:
   read_buffer_size: 4096
   write_buffer_size: 4096
   max_message_size: 8192
-  check_origin: true
+  check_origin: false
   auth:
-    required: true
+    required: false
     secret: "${WEBSOCKET_AUTH_SECRET}"
 
 # Security configuration
 security:
   cors_enabled: true
-  cors_allowed_origins: "https://dev.cryptovate.com,https://api.dev.cryptovate.com"
+  cors_allowed_origins: "*"
   rate_limit_enabled: true
   rate_limit_requests: 200
   rate_limit_duration: 60

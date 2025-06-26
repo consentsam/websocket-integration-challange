@@ -1,0 +1,103 @@
+###############################
+# Docker build context filter #
+###############################
+
+# Development and testing files
+scripts/
+tests/
+docs/
+.git/
+.github/
+.cursor/
+
+# Build artifacts and binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+websocket-service*
+websocket-integration-challange
+main
+
+# Test and temporary files
+*.test
+*.out
+tmp/
+temp/
+rough/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment and configuration files
+.env
+.env.local
+config/*.yaml
+!config/production.yaml
+
+# Log files
+*.log
+
+# Node.js artifacts (if any remain)
+node_modules/
+package-lock.json
+package.json
+
+# Monitoring and deployment artifacts
+*.json
+!go.mod
+!go.sum
+deployment-outputs.txt
+prometheus-*.yml
+grafana-*.json
+docker-compose.*.yml
+
+# Documentation and guides
+*.md
+!README.md
+
+# Vendor directory (if using go modules, this shouldn't be needed in containers)
+vendor/
+
+# CDK and AWS deployment files
+deploy/
+
+# Telemetry and monitoring configs
+alerting-rules*.yml
+
+# Exclude Markdown & guide files (kept in repo for reference)
+*.md
+
+# Exclude temporary or debug artefacts
+*.log
+*.out
+*.test
+*.json
+*.yml
+*.yaml
+*.txt
+
+# Exclude OS/IDE files
+.DS_Store
+.idea
+.vscode
+
+# Exclude local tooling & node modules
+node_modules
+
+# Exclude binary executables generated locally
+websocket-service*
+main 
