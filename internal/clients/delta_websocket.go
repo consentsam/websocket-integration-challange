@@ -33,7 +33,7 @@ type DeltaWebsocketClient struct {
 	lastError       string
 	lastErrorAt     time.Time
 	mu              sync.RWMutex
-	subscriptions   map[string]bool
+	subscriptions   map[string][]string // channel -> []assets
 	subscriptionsMu sync.RWMutex
 	totalMessages   int
 }
@@ -51,7 +51,7 @@ func NewDeltaWebsocketClient(ctx context.Context, cfg *config.Delta) *DeltaWebso
 		cancel:         cancel,
 		reconnectMax:   cfg.ReconnectMax,
 		reconnectDelay: 5 * time.Second,
-		subscriptions:  make(map[string]bool),
+		subscriptions:  make(map[string][]string),
 	}
 
 	return client
@@ -94,10 +94,31 @@ func (c *DeltaWebsocketClient) Connect() error {
 	go c.readPump()
 
 	// Subscribe to channels (without holding the lock)
-	for _, channel := range c.channels {
-		fmt.Println("Delta_WS: Connect: Subscribing to channel:", channel)
-		if err := c.Subscribe(channel, c.productIDs); err != nil {
-			log.Printf("Failed to subscribe to channel %s: %v", channel, err)
+	// First, subscribe to initial channels if no existing subscriptions
+	c.subscriptionsMu.RLock()
+	hasExistingSubscriptions := len(c.subscriptions) > 0
+	currentSubscriptions := make(map[string][]string)
+	for channel, assets := range c.subscriptions {
+		currentSubscriptions[channel] = append([]string{}, assets...)
+	}
+	c.subscriptionsMu.RUnlock()
+	
+	if !hasExistingSubscriptions {
+		// Initial connection - use config channels and productIDs
+		for _, channel := range c.channels {
+			fmt.Println("Delta_WS: Connect: Subscribing to initial channel:", channel)
+			if err := c.Subscribe(channel, c.productIDs); err != nil {
+				log.Printf("Failed to subscribe to channel %s: %v", channel, err)
+			}
+		}
+	} else {
+		// Reconnection - restore existing subscriptions
+		fmt.Println("Delta_WS: Connect: Restoring existing subscriptions...")
+		for channel, assets := range currentSubscriptions {
+			fmt.Printf("Delta_WS: Connect: Restoring subscription to channel %s with assets: %v\n", channel, assets)
+			if err := c.resubscribeChannel(channel, assets); err != nil {
+				log.Printf("Failed to restore subscription to channel %s: %v", channel, err)
+			}
 		}
 	}
 
@@ -109,6 +130,32 @@ func (c *DeltaWebsocketClient) RegisterHandler(channel string, handler MessageHa
 	c.handlersMu.Lock()
 	defer c.handlersMu.Unlock()
 	c.handlers[channel] = handler
+}
+
+// Helper functions for asset management
+func (c *DeltaWebsocketClient) containsAsset(assets []string, asset string) bool {
+	for _, a := range assets {
+		if a == asset {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *DeltaWebsocketClient) addAsset(assets []string, asset string) []string {
+	if !c.containsAsset(assets, asset) {
+		assets = append(assets, asset)
+	}
+	return assets
+}
+
+func (c *DeltaWebsocketClient) removeAsset(assets []string, asset string) []string {
+	for i, a := range assets {
+		if a == asset {
+			return append(assets[:i], assets[i+1:]...)
+		}
+	}
+	return assets
 }
 
 // readPump reads messages from the websocket
@@ -208,14 +255,31 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 		symbols = productIDs
 	}
 
-	// Create the subscription message using the new format
+	// Update internal subscription state first
+	c.subscriptionsMu.Lock()
+	var allAssets []string
+	if existingAssets, exists := c.subscriptions[channel]; exists {
+		// Add new assets to existing subscription
+		allAssets = append([]string{}, existingAssets...)
+		for _, asset := range symbols {
+			allAssets = c.addAsset(allAssets, asset)
+		}
+		c.subscriptions[channel] = allAssets
+	} else {
+		// New channel subscription
+		allAssets = append([]string{}, symbols...)
+		c.subscriptions[channel] = allAssets
+	}
+	c.subscriptionsMu.Unlock()
+
+	// Create the subscription message with ALL assets for the channel
 	msg := map[string]interface{}{
 		"type": "subscribe",
 		"payload": map[string]interface{}{
 			"channels": []map[string]interface{}{
 				{
 					"name":    channel,
-					"symbols": symbols,
+					"symbols": allAssets,
 				},
 			},
 		},
@@ -240,11 +304,6 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 		return fmt.Errorf("failed to send subscription message: %w", err)
 	}
 	c.mu.RUnlock()
-
-	// Add the subscription
-	c.subscriptionsMu.Lock()
-	c.subscriptions[channel] = true
-	c.subscriptionsMu.Unlock()
 
 	return nil
 }
@@ -283,6 +342,78 @@ func (c *DeltaWebsocketClient) Unsubscribe(channel string) error {
 	c.subscriptionsMu.Lock()
 	delete(c.subscriptions, channel)
 	c.subscriptionsMu.Unlock()
+	return nil
+}
+
+// SubscribeAssets subscribes to specific assets on a channel
+func (c *DeltaWebsocketClient) SubscribeAssets(channel string, assets []string) error {
+	return c.Subscribe(channel, assets)
+}
+
+// UnsubscribeAssets unsubscribes from specific assets on a channel
+func (c *DeltaWebsocketClient) UnsubscribeAssets(channel string, assetsToRemove []string) error {
+	c.subscriptionsMu.Lock()
+	currentAssets, exists := c.subscriptions[channel]
+	if !exists {
+		c.subscriptionsMu.Unlock()
+		return fmt.Errorf("channel %s is not subscribed", channel)
+	}
+	
+	// Remove specified assets
+	for _, asset := range assetsToRemove {
+		currentAssets = c.removeAsset(currentAssets, asset)
+	}
+	
+	// Update subscription state
+	if len(currentAssets) == 0 {
+		// No assets left, remove entire channel
+		delete(c.subscriptions, channel)
+		c.subscriptionsMu.Unlock()
+		return c.Unsubscribe(channel)
+	} else {
+		// Update with remaining assets
+		c.subscriptions[channel] = currentAssets
+		c.subscriptionsMu.Unlock()
+		
+		// Re-subscribe with remaining assets
+		return c.resubscribeChannel(channel, currentAssets)
+	}
+}
+
+// resubscribeChannel re-subscribes to a channel with specific assets
+func (c *DeltaWebsocketClient) resubscribeChannel(channel string, assets []string) error {
+	// Create the subscription message
+	msg := map[string]interface{}{
+		"type": "subscribe",
+		"payload": map[string]interface{}{
+			"channels": []map[string]interface{}{
+				{
+					"name":    channel,
+					"symbols": assets,
+				},
+			},
+		},
+	}
+
+	// Marshal the message
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal resubscription message: %w", err)
+	}
+
+	// Check connection status and send message
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("not connected to Delta Exchange")
+	}
+	
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("failed to send resubscription message: %w", err)
+	}
+	c.mu.RUnlock()
+
 	return nil
 }
 
@@ -369,4 +500,44 @@ func (c *DeltaWebsocketClient) getSubscribedChannels() []string {
 
 	fmt.Println("Delta_WS: getSubscribedChannels: Subscribed channels:", channels)
 	return channels
+}
+
+// IsAssetSubscribed checks if a specific asset is subscribed to a channel
+func (c *DeltaWebsocketClient) IsAssetSubscribed(channel string, asset string) bool {
+	c.subscriptionsMu.RLock()
+	defer c.subscriptionsMu.RUnlock()
+	
+	if assets, exists := c.subscriptions[channel]; exists {
+		return c.containsAsset(assets, asset)
+	}
+	return false
+}
+
+// GetSubscribedAssets returns all assets subscribed to a specific channel
+func (c *DeltaWebsocketClient) GetSubscribedAssets(channel string) []string {
+	c.subscriptionsMu.RLock()
+	defer c.subscriptionsMu.RUnlock()
+	
+	if assets, exists := c.subscriptions[channel]; exists {
+		// Return a copy to avoid external modification
+		result := make([]string, len(assets))
+		copy(result, assets)
+		return result
+	}
+	return []string{}
+}
+
+// GetAllSubscriptions returns all current subscriptions
+func (c *DeltaWebsocketClient) GetAllSubscriptions() map[string][]string {
+	c.subscriptionsMu.RLock()
+	defer c.subscriptionsMu.RUnlock()
+	
+	// Return a deep copy to avoid external modification
+	result := make(map[string][]string)
+	for channel, assets := range c.subscriptions {
+		assetsCopy := make([]string, len(assets))
+		copy(assetsCopy, assets)
+		result[channel] = assetsCopy
+	}
+	return result
 }
