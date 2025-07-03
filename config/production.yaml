@@ -28,22 +28,22 @@ security:
 # Delta Exchange configuration
 delta:
   enabled: true
-  url: "wss://socket.delta.exchange"
+  url: "wss://socket.india.delta.exchange"
   channels:
     - "v2/ticker"
     - "v2/trades"
     - "v2/l2_orderbook"
     - "v2/candles"
   product_ids:
-    - "BTC_USDT"
-    - "ETH_USDT"
-    - "SOL_USDT"
-    - "AVAX_USDT"
-    - "MATIC_USDT"
-    - "DOT_USDT"
-    - "LINK_USDT"
-    - "ADA_USDT"
-    - "XRP_USDT"
+    - "BTCUSD"
+    - "ETHUSD"
+    - "SOLUSD"
+    - "AVAXUSD"
+    - "MATICUSD"
+    - "DOTUSD"
+    - "LINKUSD"
+    - "ADAUSD"
+    - "XRPUSD"
   reconnect_max: 20
 
 # Metrics configuration
