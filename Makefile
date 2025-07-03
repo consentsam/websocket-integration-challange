@@ -52,6 +52,50 @@ docker-build:
 docker-run:
 	$(DOCKER) run -p 8080:8080 -p 9090:9090 $(DOCKER_IMAGE):$(DOCKER_TAG)
 
+.PHONY: deploy-aws
+deploy-aws:
+	@echo "🚀 Deploying to AWS using CDK (proven approach)..."
+	deploy/aws/deploy.sh
+
+.PHONY: deploy-aws-destroy
+deploy-aws-destroy:
+	@echo "🗑️  Destroying AWS CDK stack..."
+	cd deploy/aws/cdk && cdk destroy WebSocketServiceStack --force
+
+.PHONY: deploy-aws-diff
+deploy-aws-diff:
+	@echo "📋 Showing CDK deployment diff..."
+	cd deploy/aws/cdk && cdk diff WebSocketServiceStack
+
+.PHONY: deploy-aws-logs
+deploy-aws-logs:
+	@echo "📋 Showing AWS service logs..."
+	aws logs tail /aws/ecs/websocket-service --follow --region us-east-1
+
+.PHONY: aws-update
+aws-update:
+	./aws-deploy.sh update
+
+.PHONY: aws-destroy
+aws-destroy:
+	./aws-deploy.sh destroy
+
+.PHONY: aws-status
+aws-status:
+	./aws-deploy.sh status
+
+.PHONY: aws-logs
+aws-logs:
+	./aws-deploy.sh logs
+
+.PHONY: aws-info
+aws-info:
+	./aws-deploy.sh info
+
+.PHONY: aws-test
+aws-test:
+	./aws-deploy.sh test
+
 # Testing
 .PHONY: test
 test:
@@ -82,4 +126,28 @@ help:
 	@echo "  test           - Run tests"
 	@echo "  test-coverage  - Run tests with coverage"
 	@echo "  dev            - Run with hot reload (requires air)"
+	@echo ""
+	@echo "Local deployment targets:"
+	@echo "  deploy         - Deploy basic service with Docker Compose"
+	@echo "  deploy-production - Deploy with Nginx reverse proxy"
+	@echo "  deploy-test    - Test current deployment"
+	@echo "  deploy-stop    - Stop all deployment services"
+	@echo "  deploy-clean   - Clean up all containers and images"
+	@echo "  deploy-logs    - Show deployment logs"
+	@echo ""
+	@echo "AWS CDK deployment targets (RECOMMENDED):"
+	@echo "  deploy-aws     - Deploy to AWS using CDK (proven approach)"
+	@echo "  deploy-aws-diff - Show what will change in AWS deployment"
+	@echo "  deploy-aws-destroy - Destroy AWS CDK resources"
+	@echo "  deploy-aws-logs - Show AWS service logs"
+	@echo ""
+	@echo "AWS legacy deployment targets:"
+	@echo "  aws-deploy     - Deploy using legacy bash script"
+	@echo "  aws-update     - Update AWS deployment with new code"
+	@echo "  aws-destroy    - Destroy AWS deployment"
+	@echo "  aws-status     - Show AWS service status"
+	@echo "  aws-logs       - Show AWS service logs"
+	@echo "  aws-info       - Show AWS deployment information"
+	@echo "  aws-test       - Test AWS deployment"
+	@echo ""
 	@echo "  help           - Show this help"

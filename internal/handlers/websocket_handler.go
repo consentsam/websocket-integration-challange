@@ -37,6 +37,8 @@ type WebsocketHandler struct {
 	unregister       chan *Client
 	subscriptions    map[string]map[*Client]bool
 	subscriptionsMu  sync.RWMutex
+	registeredHandlers map[string]bool // Track which channels have handlers registered
+	handlersMu       sync.RWMutex
 	config           *config.Config
 	deltaClient      *clients.DeltaWebsocketClient
 	ctx              context.Context
@@ -68,14 +70,15 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 				return false
 			},
 		},
-		clients:       make(map[*Client]bool),
-		broadcast:     make(chan []byte),
-		register:      make(chan *Client),
-		unregister:    make(chan *Client),
-		subscriptions: make(map[string]map[*Client]bool),
-		config:        cfg,
-		ctx:           handlerCtx,
-		cancel:        cancel,
+		clients:            make(map[*Client]bool),
+		broadcast:          make(chan []byte),
+		register:           make(chan *Client),
+		unregister:         make(chan *Client),
+		subscriptions:      make(map[string]map[*Client]bool),
+		registeredHandlers: make(map[string]bool),
+		config:             cfg,
+		ctx:                handlerCtx,
+		cancel:             cancel,
 	}
 
 	fmt.Println("Websocket handler created")
@@ -86,10 +89,12 @@ func NewWebsocketHandler(ctx context.Context, cfg *config.Config) *WebsocketHand
 	if cfg.Delta.Enabled {
 		handler.deltaClient = clients.NewDeltaWebsocketClient(handlerCtx, &cfg.Delta)
 
-		// // Register handlers for Delta Exchange channels
-		// for _, channel := range cfg.Delta.Channels {
-		// 	handler.registerDeltaHandler(channel)
-		// }
+		// Register handlers for Delta Exchange channels from config
+		for _, channel := range cfg.Delta.Channels {
+			handler.registerDeltaHandler(channel)
+			handler.registeredHandlers[channel] = true
+			fmt.Println("WS_handler:ctor: Registered initial handler for channel: ", channel)
+		}
 
 		fmt.Println("WS_handler:ctor: Delta Exchange client created")
 
@@ -245,9 +250,9 @@ func (h *WebsocketHandler) Close() {
 
 // registerDeltaHandler registers a handler for a Delta Exchange channel
 func (h *WebsocketHandler) registerDeltaHandler(channel string) {
-	h.deltaClient.RegisterHandler(channel, func(message []byte, msgProductID string) {
+	h.deltaClient.RegisterHandler(channel, func(message []byte, channelName string, msgProductID string) {
 		// Broadcast the message to all clients subscribed to the channel
-		h.BroadcastToChannel(channel, message, msgProductID)
+		h.BroadcastToChannel(channelName, message, msgProductID)
 	})
 }
 
@@ -285,17 +290,17 @@ func (h *WebsocketHandler) run() {
 			}
 			h.clientsMu.Unlock()
 
-			// Remove the client from all subscriptions
-			h.subscriptionsMu.Lock()
-			for channel, clients := range h.subscriptions {
-				if _, ok := clients[client]; ok {
-					delete(clients, client)
-					if len(clients) == 0 {
-						delete(h.subscriptions, channel)
-					}
-				}
+			// Remove the client from all subscriptions and clean up assets
+			client.mu.RLock()
+			channelsToUnsubscribe := make([]string, 0, len(client.subscriptions))
+			for channel := range client.subscriptions {
+				channelsToUnsubscribe = append(channelsToUnsubscribe, channel)
 			}
-			h.subscriptionsMu.Unlock()
+			client.mu.RUnlock()
+			
+			for _, channel := range channelsToUnsubscribe {
+				h.unsubscribeClient(client, channel)
+			}
 		case message := <-h.broadcast:
 			// Broadcast the message to all clients
 			h.clientsMu.RLock()
@@ -459,7 +464,22 @@ func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interf
 					if h.deltaClient != nil {
 						if channel, ok := msg["type"].(string); ok {
 							if channel == "subscribe" {
-								h.registerDeltaHandler(channelName)
+								// Check if handler is already registered for this channel
+								h.handlersMu.RLock()
+								isRegistered := h.registeredHandlers[channelName]
+								h.handlersMu.RUnlock()
+								
+								if !isRegistered {
+									// Register handler only if not already registered
+									h.registerDeltaHandler(channelName)
+									h.handlersMu.Lock()
+									h.registeredHandlers[channelName] = true
+									h.handlersMu.Unlock()
+									fmt.Println("WS_handler: Delta: Registered NEW handler for channel: ", channelName)
+								} else {
+									fmt.Println("WS_handler: Delta: Handler already registered for channel: ", channelName)
+								}
+								
 								fmt.Println("WS_handler: Delta: subscribing to channel: ", channelName)
 								h.deltaClient.Subscribe(channelName, productIDs)
 							}
@@ -476,14 +496,19 @@ func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interf
 		return
 	}
 
-	// Send a subscription confirmation
+	// Get the client's current subscribed assets for this channel
+	client.mu.RLock()
+	currentAssets := client.productFilters[chName]
+	client.mu.RUnlock()
+
+	// Send a subscription confirmation with the actual subscribed assets
 	response := map[string]interface{}{
 		"type": "subscribed",
 		"payload": map[string]interface{}{
 			"channels": []map[string]interface{}{
 				{
 					"name":    chName,
-					"symbols": []string{"all"},
+					"symbols": currentAssets,
 				},
 			},
 		},
@@ -502,8 +527,8 @@ func (h *WebsocketHandler) handleSubscribe(client *Client, msg map[string]interf
 
 // handleUnsubscribe handles an unsubscribe message
 func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]interface{}) {
-	// Get the channel from the message
-	var chName string = ""
+	fmt.Println("unsubscribing a message: ", msg)
+	
 	// Check if the message has the new format with payload.channels
 	if payload, ok := msg["payload"].(map[string]interface{}); ok {
 		if channels, ok := payload["channels"].([]interface{}); ok {
@@ -517,31 +542,51 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 						continue
 					}
 
-					fmt.Println("subscribing to channel: ", channelName)
-					chName = channelName
-
-					if h.deltaClient != nil {
-						if channel, ok := msg["type"].(string); ok {
-							if channel == "unsubscribe" {
-								fmt.Println("WS_handler: Delta: unsubscribing from channel: ", channelName)
-								//check if no other subscriptions exist for this channel
-								if clients, ok := h.subscriptions[channelName]; ok {
-									if len(clients) == 0 {
-										// Unsubscribe the client from the channel
-										h.deltaClient.Unsubscribe(channelName)
-									} else {
-										fmt.Println("WS_handler: Delta: still ", len(clients), " clients subscribed to channel: ", channelName)
+					// Get the symbols to unsubscribe from
+					var assetsToUnsubscribe []string
+					if symbols, ok := channelMap["symbols"].([]interface{}); ok {
+						for _, symbol := range symbols {
+							if symbolStr, ok := symbol.(string); ok {
+								if symbolStr == "all" {
+									// Unsubscribe from all assets - this means complete channel unsubscription
+									fmt.Println("unsubscribing from ALL assets on channel: ", channelName)
+									
+									// Check if client is actually subscribed to this channel
+									client.mu.RLock()
+									_, hasSubscription := client.productFilters[channelName]
+									client.mu.RUnlock()
+									
+									if !hasSubscription {
+										fmt.Printf("WS_handler: Client not subscribed to channel %s\n", channelName)
+										h.sendUnsubscribeError(client, channelName, []string{"all"}, "Not subscribed to this channel")
+										return
 									}
+									
+									h.unsubscribeClient(client, channelName)
+									// Send unsubscription confirmation
+									h.sendUnsubscribeConfirmation(client, channelName, []string{"all"})
+									return
 								} else {
-									// Unsubscribe the client from the channel
-									h.deltaClient.Unsubscribe(channelName)
-									fmt.Println("WS_handler: Delta: unsubscribed from channel: ", channelName)
+									assetsToUnsubscribe = append(assetsToUnsubscribe, symbolStr)
 								}
 							}
 						}
 					}
-					// Subscribe the client to the channel
-					h.unsubscribeClient(client, channelName)
+
+					fmt.Println("unsubscribing from channel: ", channelName)
+					fmt.Println("unsubscribing from assets: ", assetsToUnsubscribe)
+
+					// Unsubscribe from specific assets
+					if len(assetsToUnsubscribe) > 0 {
+						success := h.unsubscribeClientFromAssets(client, channelName, assetsToUnsubscribe)
+						if success {
+							// Send unsubscription confirmation
+							h.sendUnsubscribeConfirmation(client, channelName, assetsToUnsubscribe)
+						} else {
+							// Send error message
+							h.sendUnsubscribeError(client, channelName, assetsToUnsubscribe, "Not subscribed to the specified assets")
+						}
+					}
 				}
 			}
 		}
@@ -549,21 +594,6 @@ func (h *WebsocketHandler) handleUnsubscribe(client *Client, msg map[string]inte
 		log.Printf("Unsubscribe message does not contain a payload")
 		return
 	}
-
-	// Unsubscribe the client from the channel
-	// h.unsubscribeClient(client, channel)
-
-	// Send an unsubscription confirmation
-	response := map[string]interface{}{
-		"type":    "unsubscribed",
-		"channel": chName,
-	}
-	data, err := json.Marshal(response)
-	if err != nil {
-		log.Printf("Error marshaling unsubscription confirmation: %v", err)
-		return
-	}
-	client.send <- data
 }
 
 // handlePing handles a ping message
@@ -586,7 +616,36 @@ func (h *WebsocketHandler) subscribeClient(client *Client, channel string, produ
 	// Add the subscription to the client
 	client.mu.Lock()
 	client.subscriptions[channel] = true
-	client.productFilters[channel] = productIDs
+	
+	// Merge new productIDs with existing ones instead of overwriting
+	existingProductIDs, exists := client.productFilters[channel]
+	if exists {
+		// Create a map to avoid duplicates
+		productIDMap := make(map[string]bool)
+		
+		// Add existing product IDs
+		for _, existingID := range existingProductIDs {
+			productIDMap[existingID] = true
+		}
+		
+		// Add new product IDs
+		for _, newID := range productIDs {
+			productIDMap[newID] = true
+		}
+		
+		// Convert back to slice
+		mergedProductIDs := make([]string, 0, len(productIDMap))
+		for productID := range productIDMap {
+			mergedProductIDs = append(mergedProductIDs, productID)
+		}
+		
+		client.productFilters[channel] = mergedProductIDs
+		fmt.Printf("WS_handler: Merged product filters for channel %s: %v\n", channel, mergedProductIDs)
+	} else {
+		client.productFilters[channel] = productIDs
+		fmt.Printf("WS_handler: Set new product filters for channel %s: %v\n", channel, productIDs)
+	}
+	
 	client.mu.Unlock()
 
 	// Add the client to the subscription
@@ -598,8 +657,215 @@ func (h *WebsocketHandler) subscribeClient(client *Client, channel string, produ
 	h.subscriptionsMu.Unlock()
 }
 
+// getActiveAssetsForChannel returns all assets currently subscribed by active clients for a channel
+func (h *WebsocketHandler) getActiveAssetsForChannel(channel string) []string {
+	activeAssets := make(map[string]bool)
+	
+	h.subscriptionsMu.RLock()
+	if clients, ok := h.subscriptions[channel]; ok {
+		for client := range clients {
+			client.mu.RLock()
+			if assets, hasFilter := client.productFilters[channel]; hasFilter {
+				for _, asset := range assets {
+					activeAssets[asset] = true
+				}
+			}
+			client.mu.RUnlock()
+		}
+	}
+	h.subscriptionsMu.RUnlock()
+	
+	result := make([]string, 0, len(activeAssets))
+	for asset := range activeAssets {
+		result = append(result, asset)
+	}
+	return result
+}
+
+// sendUnsubscribeConfirmation sends an unsubscribe confirmation to the client
+func (h *WebsocketHandler) sendUnsubscribeConfirmation(client *Client, channel string, assets []string) {
+	response := map[string]interface{}{
+		"type": "unsubscribed",
+		"payload": map[string]interface{}{
+			"channels": []map[string]interface{}{
+				{
+					"name":    channel,
+					"symbols": assets,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling unsubscription confirmation: %v", err)
+		return
+	}
+	fmt.Println("sending unsubscription confirmation: ", string(data))
+	client.send <- data
+}
+
+// sendUnsubscribeError sends an unsubscribe error to the client
+func (h *WebsocketHandler) sendUnsubscribeError(client *Client, channel string, assets []string, errorMessage string) {
+	response := map[string]interface{}{
+		"type": "error",
+		"error": map[string]interface{}{
+			"code":    "UNSUBSCRIBE_FAILED",
+			"message": errorMessage,
+			"details": map[string]interface{}{
+				"channel": channel,
+				"symbols": assets,
+			},
+		},
+	}
+	data, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling unsubscription error: %v", err)
+		return
+	}
+	fmt.Println("sending unsubscription error: ", string(data))
+	client.send <- data
+}
+
+// sendSubscriptionError sends a subscription error to the client
+func (h *WebsocketHandler) sendSubscriptionError(client *Client, channel string, errorMessage string) {
+	response := map[string]interface{}{
+		"type": "error",
+		"error": map[string]interface{}{
+			"code":    "SUBSCRIBE_FAILED",
+			"message": errorMessage,
+			"details": map[string]interface{}{
+				"channel": channel,
+			},
+		},
+	}
+	data, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling subscription error: %v", err)
+		return
+	}
+	fmt.Println("sending subscription error: ", string(data))
+	client.send <- data
+}
+
+// unsubscribeClientFromAssets unsubscribes a client from specific assets in a channel
+// Returns true if successful, false if client wasn't subscribed or assets weren't found
+func (h *WebsocketHandler) unsubscribeClientFromAssets(client *Client, channel string, assetsToRemove []string) bool {
+	// Get current client assets for this channel
+	client.mu.Lock()
+	currentAssets, hasSubscription := client.productFilters[channel]
+	if !hasSubscription {
+		client.mu.Unlock()
+		fmt.Printf("WS_handler: Client not subscribed to channel %s\n", channel)
+		return false
+	}
+
+	// Check if any of the assets to remove actually exist in client's subscription
+	removeMap := make(map[string]bool)
+	for _, asset := range assetsToRemove {
+		removeMap[asset] = true
+	}
+	
+	// Check if client has any of the assets they want to remove
+	hasAnyAsset := false
+	for _, asset := range currentAssets {
+		if removeMap[asset] {
+			hasAnyAsset = true
+			break
+		}
+	}
+	
+	if !hasAnyAsset {
+		client.mu.Unlock()
+		fmt.Printf("WS_handler: Client not subscribed to any of the assets %v in channel %s\n", assetsToRemove, channel)
+		return false
+	}
+
+	// Filter out the assets to remove (reuse the removeMap from above)
+	var remainingAssets []string
+	for _, asset := range currentAssets {
+		if !removeMap[asset] {
+			remainingAssets = append(remainingAssets, asset)
+		}
+	}
+
+	fmt.Printf("WS_handler: Client had assets %v, removing %v, remaining %v\n", currentAssets, assetsToRemove, remainingAssets)
+
+	// Update client's product filters
+	if len(remainingAssets) == 0 {
+		// No assets left, remove client from channel completely
+		delete(client.subscriptions, channel)
+		delete(client.productFilters, channel)
+		client.mu.Unlock()
+		
+		// Remove client from channel subscription
+		h.subscriptionsMu.Lock()
+		if clients, ok := h.subscriptions[channel]; ok {
+			delete(clients, client)
+			if len(clients) == 0 {
+				delete(h.subscriptions, channel)
+				h.subscriptionsMu.Unlock()
+				
+				// No more clients for this channel, unsubscribe completely from Delta
+				if h.deltaClient != nil {
+					fmt.Printf("WS_handler: Delta: No more clients for channel %s, unsubscribing completely\n", channel)
+					h.deltaClient.Unsubscribe(channel)
+				}
+				return true
+			}
+		}
+		h.subscriptionsMu.Unlock()
+		
+		fmt.Printf("WS_handler: Client removed from channel %s (no remaining assets)\n", channel)
+	} else {
+		// Update with remaining assets
+		client.productFilters[channel] = remainingAssets
+		client.mu.Unlock()
+		fmt.Printf("WS_handler: Updated client assets for channel %s: %v\n", channel, remainingAssets)
+	}
+
+	// Check if we need to remove specific assets from Delta
+	if h.deltaClient != nil && len(assetsToRemove) > 0 {
+		// Get assets still needed by all clients
+		activeAssets := h.getActiveAssetsForChannel(channel)
+		activeAssetsMap := make(map[string]bool)
+		for _, asset := range activeAssets {
+			activeAssetsMap[asset] = true
+		}
+
+		// Find assets that are no longer needed by any client
+		var deltaAssetsToRemove []string
+		for _, asset := range assetsToRemove {
+			// Skip "all" - it's a special case that shouldn't be removed individually
+			if asset != "all" && !activeAssetsMap[asset] {
+				deltaAssetsToRemove = append(deltaAssetsToRemove, asset)
+			}
+		}
+
+		// Remove unused assets from Delta subscription
+		if len(deltaAssetsToRemove) > 0 {
+			fmt.Printf("WS_handler: Delta: Removing unused assets %v from channel %s\n", deltaAssetsToRemove, channel)
+			if err := h.deltaClient.UnsubscribeAssets(channel, deltaAssetsToRemove); err != nil {
+				fmt.Printf("WS_handler: Delta: Error removing assets: %v\n", err)
+			}
+		} else {
+			fmt.Printf("WS_handler: Delta: Assets %v still needed by other clients, not removing from Delta\n", assetsToRemove)
+		}
+	}
+	
+	return true
+}
+
 // unsubscribeClient unsubscribes a client from a channel
 func (h *WebsocketHandler) unsubscribeClient(client *Client, channel string) {
+	// Get the assets this client was subscribed to before removing them
+	client.mu.RLock()
+	clientAssets, hadSubscription := client.productFilters[channel]
+	client.mu.RUnlock()
+	
+	if !hadSubscription {
+		return // Client wasn't subscribed to this channel
+	}
+	
 	// Remove the subscription from the client
 	client.mu.Lock()
 	delete(client.subscriptions, channel)
@@ -611,8 +877,43 @@ func (h *WebsocketHandler) unsubscribeClient(client *Client, channel string) {
 	if clients, ok := h.subscriptions[channel]; ok {
 		delete(clients, client)
 		if len(clients) == 0 {
+			// No more clients, unsubscribe completely from Delta
 			delete(h.subscriptions, channel)
+			h.subscriptionsMu.Unlock()
+			
+			if h.deltaClient != nil {
+				fmt.Printf("WS_handler: Delta: No more clients for channel %s, unsubscribing completely\n", channel)
+				h.deltaClient.Unsubscribe(channel)
+			}
+			return
 		}
 	}
 	h.subscriptionsMu.Unlock()
+
+	// Check if we need to remove specific assets from Delta
+	if h.deltaClient != nil && len(clientAssets) > 0 {
+		// Get assets still needed by remaining clients
+		activeAssets := h.getActiveAssetsForChannel(channel)
+		activeAssetsMap := make(map[string]bool)
+		for _, asset := range activeAssets {
+			activeAssetsMap[asset] = true
+		}
+		
+		// Find assets that are no longer needed
+		assetsToRemove := make([]string, 0)
+		for _, asset := range clientAssets {
+			// Skip "all" - it's a special case that shouldn't be removed individually
+			if asset != "all" && !activeAssetsMap[asset] {
+				assetsToRemove = append(assetsToRemove, asset)
+			}
+		}
+		
+		// Remove unused assets from Delta subscription
+		if len(assetsToRemove) > 0 {
+			fmt.Printf("WS_handler: Delta: Removing unused assets %v from channel %s\n", assetsToRemove, channel)
+			if err := h.deltaClient.UnsubscribeAssets(channel, assetsToRemove); err != nil {
+				fmt.Printf("WS_handler: Delta: Error removing assets: %v\n", err)
+			}
+		}
+	}
 }

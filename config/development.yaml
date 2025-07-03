@@ -12,10 +12,7 @@ websocket:
   read_buffer_size: 4096
   write_buffer_size: 4096
   max_message_size: 8192
-  check_origin: true
-  auth:
-    required: true
-    secret: "${WEBSOCKET_AUTH_SECRET}"
+  check_origin: false
 
 # Security configuration
 security:
@@ -31,8 +28,6 @@ delta:
   url: "wss://socket.india.delta.exchange"
   channels:
     - "v2/ticker"
-    - "v2/trades"
-    - "v2/l2_orderbook"
   product_ids:
     - "BTCUSD"
     - "ETHUSD"

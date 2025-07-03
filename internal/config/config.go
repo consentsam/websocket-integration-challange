@@ -30,10 +30,6 @@ type Config struct {
 		WriteBufferSize int   `mapstructure:"write_buffer_size"`
 		MaxMessageSize  int64 `mapstructure:"max_message_size"`
 		CheckOrigin     bool  `mapstructure:"check_origin"`
-		Auth            struct {
-			Required bool   `mapstructure:"required"`
-			Secret   string `mapstructure:"secret"`
-		} `mapstructure:"auth"`
 	} `mapstructure:"websocket"`
 
 	// Security configuration
@@ -134,9 +130,7 @@ func validateDelta(config interface{}) error {
 		if err := sc.ValidateNonEmptySlice(cfg.Delta.Channels, "delta.channels"); err != nil {
 			return err
 		}
-		if err := sc.ValidateNonEmptySlice(cfg.Delta.ProductIDs, "delta.product_ids"); err != nil {
-			return err
-		}
+		// Removed validation for product_ids - allow empty to use default behavior
 		if err := sc.ValidateNonNegative(cfg.Delta.ReconnectMax, "delta.reconnect_max"); err != nil {
 			return err
 		}
@@ -178,8 +172,8 @@ func logConfig(logger *sc.ConfigLogger, config interface{}) {
 		cfg.Websocket.WriteBufferSize,
 		cfg.Websocket.MaxMessageSize,
 		cfg.Websocket.CheckOrigin,
-		cfg.Websocket.Auth.Required,
-		cfg.Websocket.Auth.Secret,
+		false, // auth_required - always false (no auth)
+		"",    // auth_secret - always empty (no auth)
 	)
 	
 	// Log security configuration

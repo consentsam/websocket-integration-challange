@@ -52,9 +52,7 @@ func (w *WebsocketConfigValidator) BuildDeltaValidation() ValidatorFunc {
 				if err := ValidateNonEmptySlice(cfg.GetDeltaChannels(), "delta.channels"); err != nil {
 					return err
 				}
-				if err := ValidateNonEmptySlice(cfg.GetDeltaProductIDs(), "delta.product_ids"); err != nil {
-					return err
-				}
+				// Removed validation for product_ids - allow empty to use default behavior
 				if err := ValidateNonNegative(cfg.GetDeltaReconnectMax(), "delta.reconnect_max"); err != nil {
 					return err
 				}

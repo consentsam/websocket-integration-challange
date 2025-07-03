@@ -99,8 +99,7 @@ func (l *ViperConfigLoader) SetDefaults(v *viper.Viper, serviceName string) {
 	v.SetDefault("websocket.write_buffer_size", 1024)
 	v.SetDefault("websocket.max_message_size", 4096)
 	v.SetDefault("websocket.check_origin", false)
-	v.SetDefault("websocket.auth.required", false)
-	v.SetDefault("websocket.auth.secret", "default-secret")
+	// Authentication removed - no auth needed
 
 	// Security defaults
 	v.SetDefault("security.cors_enabled", true)
@@ -113,7 +112,7 @@ func (l *ViperConfigLoader) SetDefaults(v *viper.Viper, serviceName string) {
 	v.SetDefault("delta.enabled", true)
 	v.SetDefault("delta.url", "wss://socket.india.delta.exchange")
 	v.SetDefault("delta.channels", []string{"v2/ticker"})
-	v.SetDefault("delta.product_ids", []string{"BTC_USDT"})
+	// Removed hardcoded product_ids default - let users specify their own
 	v.SetDefault("delta.reconnect_max", 5)
 
 	// Metrics defaults

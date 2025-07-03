@@ -1,0 +1,52 @@
+{
+    "app": "go run cdk/cmd/deploy/main.go",
+    "watch": {
+        "include": [
+            "**"
+        ],
+        "exclude": [
+            "README.md",
+            "cdk*.json",
+            "**/*.d.ts",
+            "**/*.js",
+            "node_modules",
+            "**/*test.go"
+        ]
+    },
+    "context": {
+        "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+        "@aws-cdk/core:checkSecretUsage": true,
+        "@aws-cdk/core:target": "aws-cdk-lib",
+        "@aws-cdk/core:enableStackNameDuplicates": true,
+        "aws-cdk:enableDiffNoFail": true,
+        "@aws-cdk/core:stackRelativeExports": true,
+        "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
+        "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+        "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+        "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
+        "@aws-cdk/core:enablePartitionLiterals": true,
+        "@aws-cdk/aws-events:eventsTargetQueueSameAccount": true,
+        "@aws-cdk/aws-iam:minimizePolicies": true,
+        "@aws-cdk/core:validateSnapshotRemovalPolicy": true,
+        "@aws-cdk/aws-codepipeline:crossAccountKeyAliasStackSafeResourceName": true,
+        "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
+        "@aws-cdk/aws-sns-subscriptions:restrictSqsDescryption": true,
+        "@aws-cdk/aws-apigateway:requestValidatorUniqueId": true,
+        "@aws-cdk/aws-kms:aliasNameRef": true,
+        "@aws-cdk/core:includePrefixInUniqueNameGeneration": true,
+        "@aws-cdk/aws-efs:denyAnonymousAccess": true,
+        "@aws-cdk/aws-opensearchservice:enableOpensearchMultiAzWithStandby": true,
+        "@aws-cdk/aws-lambda-nodejs:useLatestRuntimeVersion": true,
+        "@aws-cdk/aws-efs:mountTargetOrderInsensitiveLogicalId": true,
+        "@aws-cdk/aws-rds:auroraClusterChangeScopeOfInstanceParameterGroupWithEachParameters": true,
+        "@aws-cdk/aws-appsync:useArnForSourceApiAssociationIdentifier": true,
+        "@aws-cdk/aws-rds:preventRenderingDeprecatedCredentials": true,
+        "@aws-cdk/aws-codepipeline-actions:useNewDefaultBranchForSourceAction": true
+    },
+    "deploymentConfig": {
+        "region": "us-east-1",
+        "account": "577638382580",
+        "environment": "production",
+        "alertEmail": "admin@example.com"
+    }
+}

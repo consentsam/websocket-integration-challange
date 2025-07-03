@@ -13,7 +13,7 @@ import (
 )
 
 // MessageHandler is a function that handles messages from Delta Exchange
-type MessageHandler func(message []byte, productId string)
+type MessageHandler func(message []byte, channelName string, productId string)
 
 // DeltaWebsocketClient is a client for the Delta Exchange websocket API
 type DeltaWebsocketClient struct {
@@ -93,8 +93,7 @@ func (c *DeltaWebsocketClient) Connect() error {
 	// Start the read pump
 	go c.readPump()
 
-	// Subscribe to channels (without holding the lock)
-	// First, subscribe to initial channels if no existing subscriptions
+	// Only restore existing subscriptions on reconnection (no automatic initial subscriptions)
 	c.subscriptionsMu.RLock()
 	hasExistingSubscriptions := len(c.subscriptions) > 0
 	currentSubscriptions := make(map[string][]string)
@@ -103,15 +102,7 @@ func (c *DeltaWebsocketClient) Connect() error {
 	}
 	c.subscriptionsMu.RUnlock()
 	
-	if !hasExistingSubscriptions {
-		// Initial connection - use config channels and productIDs
-		for _, channel := range c.channels {
-			fmt.Println("Delta_WS: Connect: Subscribing to initial channel:", channel)
-			if err := c.Subscribe(channel, c.productIDs); err != nil {
-				log.Printf("Failed to subscribe to channel %s: %v", channel, err)
-			}
-		}
-	} else {
+	if hasExistingSubscriptions {
 		// Reconnection - restore existing subscriptions
 		fmt.Println("Delta_WS: Connect: Restoring existing subscriptions...")
 		for channel, assets := range currentSubscriptions {
@@ -120,6 +111,8 @@ func (c *DeltaWebsocketClient) Connect() error {
 				log.Printf("Failed to restore subscription to channel %s: %v", channel, err)
 			}
 		}
+	} else {
+		fmt.Println("Delta_WS: Connect: No existing subscriptions to restore. Waiting for client subscriptions...")
 	}
 
 	return nil
@@ -193,7 +186,8 @@ func (c *DeltaWebsocketClient) readPump() {
 
 	for {
 		_, message, err := conn.ReadMessage()
-		// fmt.Println("Delta_WS: readPump: Read message:", string(message))
+		
+		fmt.Println("Delta_WS: readPump: Read message:", string(message))
 		if err != nil {
 			// Update error state with lock
 			c.mu.Lock()
@@ -213,19 +207,20 @@ func (c *DeltaWebsocketClient) readPump() {
 		// Check for the new message format with payload.channels
 		var channel string
 		var msgProductID string
-		// if payload, ok := msg["payload"].(map[string]interface{}); ok {
-		// 	if channels, ok := payload["channels"].([]interface{}); ok && len(channels) > 0 {
-		// 		if channelMap, ok := channels[0].(map[string]interface{}); ok {
-		// 			if name, ok := channelMap["name"].(string); ok {
-		// 				channel = name
-		// 			}
-		// 		}
-		// 	}
-		// }
+		
+		// Handle different message types
 		if msgType, ok := msg["type"].(string); ok {
+			switch msgType {
+			case "subscriptions":
+				// Handle subscription confirmation messages - these are just confirmations, not data
+				fmt.Printf("Delta_WS: readPump: Subscription confirmation: %v\n", msg)
+				continue
+			default:
 			channel = msgType
+			}
 		} else {
 			log.Printf("Delta_WS: readPump: msg does not contain a valid 'type' field: %v", msg)
+			continue
 		}
 		
 		// Get the product ID from the symbol field
@@ -233,16 +228,44 @@ func (c *DeltaWebsocketClient) readPump() {
 			msgProductID = productId
 		}
 
+		// Check if this asset is actually subscribed before calling handler
+		c.subscriptionsMu.RLock()
+		subscribedAssets, channelExists := c.subscriptions[channel]
+		isAssetSubscribed := false
+		if channelExists && msgProductID != "" {
+			isAssetSubscribed = c.containsAsset(subscribedAssets, msgProductID)
+		} else if channelExists && msgProductID == "" {
+			// If no specific product ID, assume it's a general channel message
+			isAssetSubscribed = true
+		}
+		c.subscriptionsMu.RUnlock()
+
+		// Only process message if the asset is subscribed or if it's a general channel message
+		if !channelExists {
+			fmt.Printf("Delta_WS: readPump: Ignoring message - channel '%s' not subscribed\n", channel)
+			continue
+		}
+
+		if msgProductID != "" && !isAssetSubscribed {
+			fmt.Printf("Delta_WS: readPump: Ignoring message - asset '%s' not subscribed to channel '%s'. Subscribed assets: %v\n", 
+				msgProductID, channel, subscribedAssets)
+			continue
+		}
+
 		// Call the handler for the channel
 		c.handlersMu.RLock()
 		c.totalMessages++
-		fmt.Println("Delta_WS: readPump: Channel:", channel, "product:", msgProductID, "Message count:", c.totalMessages)
+		fmt.Println("Delta_WS: readPump: Processing message - Channel:", channel, "product:", msgProductID, "Message count:", c.totalMessages)
+		fmt.Printf("Delta_WS: readPump: Subscribed assets for channel '%s': %v\n", channel, subscribedAssets)
 		
 		// Find and call the handler for this channel
 		handler, ok := c.handlers[channel]
 		c.handlersMu.RUnlock()
 		if ok {
-			handler(message, msgProductID)
+			fmt.Printf("Delta_WS: readPump: Calling handler for channel '%s', asset '%s'\n", channel, msgProductID)
+			handler(message, channel, msgProductID)
+		} else {
+			fmt.Printf("Delta_WS: readPump: No handler registered for channel '%s'\n", channel)
 		}
 	}
 }
@@ -261,6 +284,7 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 	if existingAssets, exists := c.subscriptions[channel]; exists {
 		// Add new assets to existing subscription
 		allAssets = append([]string{}, existingAssets...)
+		log.Println("Delta_WS: Subscribe: Existing assets:", allAssets)
 		for _, asset := range symbols {
 			allAssets = c.addAsset(allAssets, asset)
 		}
@@ -268,6 +292,7 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 	} else {
 		// New channel subscription
 		allAssets = append([]string{}, symbols...)
+		log.Println("Delta_WS: Subscribe: New assets:", allAssets)
 		c.subscriptions[channel] = allAssets
 	}
 	c.subscriptionsMu.Unlock()
