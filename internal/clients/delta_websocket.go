@@ -228,20 +228,18 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 		return fmt.Errorf("failed to marshal subscription message: %w", err)
 	}
 
-	// Check connection status and get conn (with lock)
-	var conn *websocket.Conn
+	// Check connection status and send message (with lock held)
 	c.mu.RLock()
-	if !c.connected {
+	if !c.connected || c.conn == nil {
 		c.mu.RUnlock()
 		return fmt.Errorf("not connected to Delta Exchange")
 	}
-	conn = c.conn
-	c.mu.RUnlock()
-
-	// Send the message (without holding the lock)
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	// Send the message while holding the lock to prevent TOCTOU race
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		c.mu.RUnlock()
 		return fmt.Errorf("failed to send subscription message: %w", err)
 	}
+	c.mu.RUnlock()
 
 	// Add the subscription
 	c.subscriptionsMu.Lock()
@@ -253,14 +251,6 @@ func (c *DeltaWebsocketClient) Subscribe(channel string, productIDs []string) er
 
 // unsubscribe unsubscribes from a channel
 func (c *DeltaWebsocketClient) Unsubscribe(channel string) error {
-	// Check connection status and get conn (with lock)
-	c.mu.RLock()
-	if !c.connected {
-		c.mu.RUnlock()
-		return fmt.Errorf("not connected to Delta Exchange")
-	}
-	conn := c.conn
-	c.mu.RUnlock()
 	// Create the unsubscription message
 	msg := map[string]interface{}{
 		"type": "unsubscribe",
@@ -277,10 +267,18 @@ func (c *DeltaWebsocketClient) Unsubscribe(channel string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal unsubscription message: %w", err)
 	}
-	// Send the message (without holding the lock)
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	// Check connection status and send message (with lock held)
+	c.mu.RLock()
+	if !c.connected || c.conn == nil {
+		c.mu.RUnlock()
+		return fmt.Errorf("not connected to Delta Exchange")
+	}
+	// Send the message while holding the lock to prevent TOCTOU race
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		c.mu.RUnlock()
 		return fmt.Errorf("failed to send unsubscription message: %w", err)
 	}
+	c.mu.RUnlock()
 	// Remove the subscription
 	c.subscriptionsMu.Lock()
 	delete(c.subscriptions, channel)
