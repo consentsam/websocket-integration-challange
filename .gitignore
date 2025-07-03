@@ -43,3 +43,16 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Generated files
+gen/
+
+# Test coverage files
+coverage.html
+
+# AWS CDK build artifacts
+cdk.out/
+outputs.json
+
+# Docker build artifacts
+.docker/
