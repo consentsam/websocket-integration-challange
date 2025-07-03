@@ -33,9 +33,9 @@ delta:
     - "v2/ticker"
     - "v2/trades"
   product_ids:
-    - "BTC_USDT"
-    - "ETH_USDT"
-    - "SOL_USDT"
+    - "BTCUSD"
+    - "ETHUSD"
+    - "SOLUSD"
   reconnect_max: 5
 
 # Metrics configuration

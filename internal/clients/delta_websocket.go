@@ -88,16 +88,18 @@ func (c *DeltaWebsocketClient) Connect() error {
 	c.reconnectCount = 0
 	c.mu.Unlock()
 
+	fmt.Printf("Delta_WS: Connect: Successfully connected to %s\n", c.url)
+
 	// Start the read pump
 	go c.readPump()
 
-	// // Subscribe to channels (without holding the lock)
-	// for _, channel := range c.channels {
-	// 	fmt.Println("Delta_WS: Connect: Subscribing to channel:", channel)
-	// 	if err := c.Subscribe(channel, c.productIDs); err != nil {
-	// 		log.Printf("Failed to subscribe to channel %s: %v", channel, err)
-	// 	}
-	// }
+	// Subscribe to channels (without holding the lock)
+	for _, channel := range c.channels {
+		fmt.Println("Delta_WS: Connect: Subscribing to channel:", channel)
+		if err := c.Subscribe(channel, c.productIDs); err != nil {
+			log.Printf("Failed to subscribe to channel %s: %v", channel, err)
+		}
+	}
 
 	return nil
 }
@@ -178,21 +180,18 @@ func (c *DeltaWebsocketClient) readPump() {
 		} else {
 			log.Printf("Delta_WS: readPump: msg does not contain a valid 'type' field: %v", msg)
 		}
+		
+		// Get the product ID from the symbol field
 		if productId, ok := msg["symbol"].(string); ok {
 			msgProductID = productId
-		} else {
-			log.Printf("Delta_WS: readPump: msg does not contain a valid 'type' field: %v", msg)
 		}
 
 		// Call the handler for the channel
 		c.handlersMu.RLock()
 		c.totalMessages++
 		fmt.Println("Delta_WS: readPump: Channel:", channel, "product:", msgProductID, "Message count:", c.totalMessages)
-		// for ch := range c.handlers {
-		// 	fmt.Printf("Delta_WS: readPump: Registered handler for channel: %s\n", ch)
-		// }
-
-		// Every message has type, and based on that type (Channel name) we can call the handler.
+		
+		// Find and call the handler for this channel
 		handler, ok := c.handlers[channel]
 		c.handlersMu.RUnlock()
 		if ok {

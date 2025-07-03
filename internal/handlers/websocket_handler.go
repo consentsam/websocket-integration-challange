@@ -157,18 +157,27 @@ func (h *WebsocketHandler) BroadcastToChannel(channel string, message []byte, pr
 
 		// If the client has a product filter, check if the message matches the filter
 		if hasFilter && len(clientProductIDs) > 0 {
-			// Check if any of the product IDs match
-			fmt.Println("WS_Handler: Broadcast: checking product ids:", productID, "in clientProductIDs:", clientProductIDs)
-			match := false
+			// Check if client subscribed to "all" products
+			isSubscribedToAll := false
 			for _, clientProductID := range clientProductIDs {
-				if productID == clientProductID {
-					fmt.Println("WS_Handler: Broadcast: found a match for product id:", productID, "in clientProductIDs:", clientProductIDs)
-					match = true
+				if clientProductID == "all" {
+					isSubscribedToAll = true
 					break
 				}
 			}
-			if !match {
-				continue
+			
+			// If not subscribed to all, check if any of the product IDs match
+			if !isSubscribedToAll {
+				match := false
+				for _, clientProductID := range clientProductIDs {
+					if productID == clientProductID {
+						match = true
+						break
+					}
+				}
+				if !match {
+					continue
+				}
 			}
 		}
 

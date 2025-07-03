@@ -24,7 +24,7 @@ run:
 	$(GO) run main.go
 
 .PHONY: build
-build:
+build: proto
 	$(GO) build $(LDFLAGS) -o $(SERVICE_NAME) main.go
 
 .PHONY: clean
